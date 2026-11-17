@@ -1,0 +1,53 @@
+# Central Kafka infrastructure for the Resolve platform.
+#
+# Source of truth: Resolve_Documentation/Contracts/kafka.md
+#
+# Brings up a shared Redpanda broker (Kafka-compatible) and provisions
+# all 20 topics (10 main domain events + 10 dead-letter queues).
+#
+# Usage:
+#   docker compose up -d              # start broker + create topics
+#   docker compose logs kafka-init    # view topic creation output
+#   docker compose down               # stop (data persists in volume)
+#   docker compose down -v            # stop + delete all data
+#
+# Services connect from the host via localhost:9092.
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: resolve-kafka
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health 2>&1 | grep -qi 'healthy.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  kafka-init:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: resolve-kafka-init
+    network_mode: "service:redpanda"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    volumes:
+      - ./scripts/create-topics.sh:/create-topics.sh:ro
+    entrypoint: ["/bin/sh", "/create-topics.sh"]
+    restart: "no"
+
+volumes:
+  redpanda-data:
