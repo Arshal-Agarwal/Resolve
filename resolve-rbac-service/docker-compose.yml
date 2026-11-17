@@ -1,0 +1,84 @@
+services:
+  rbac-postgres:
+    image: postgres:16-alpine
+    networks:
+      - rbac-data
+    environment:
+      POSTGRES_USER: ${RBAC_POSTGRES_USER:-rbac}
+      POSTGRES_PASSWORD: ${RBAC_POSTGRES_PASSWORD:-rbac}
+      POSTGRES_DB: ${RBAC_POSTGRES_DB:-rbac_service}
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - rbac_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${RBAC_POSTGRES_USER:-rbac} -d ${RBAC_POSTGRES_DB:-rbac_service}']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  jwks-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ['node', 'mocks/server.js']
+    ports:
+      - '4400:4400'
+
+  migrate:
+    networks:
+      - rbac-data
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ['npx', 'node-pg-migrate', 'up']
+    environment:
+      - DATABASE_URL=postgres://${RBAC_POSTGRES_USER:-rbac}:${RBAC_POSTGRES_PASSWORD:-rbac}@rbac-postgres:5432/${RBAC_POSTGRES_DB:-rbac_service}
+    depends_on:
+      rbac-postgres:
+        condition: service_healthy
+
+  rbac-service:
+    networks:
+      - default
+      - rbac-data
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '4300:4300'
+    environment:
+      - PORT=4300
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://${RBAC_POSTGRES_USER:-rbac}:${RBAC_POSTGRES_PASSWORD:-rbac}@rbac-postgres:5432/${RBAC_POSTGRES_DB:-rbac_service}
+      - REDIS_URL=redis://redis:6379
+      - USE_MOCK_JWKS=${USE_MOCK_JWKS:-true}
+      - AUTHENTICATION_SERVICE_URL=${AUTHENTICATION_SERVICE_URL:-http://jwks-mock:4400}
+    depends_on:
+      rbac-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jwks-mock:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+networks:
+  default: {}
+  rbac-data:
+    internal: true
+
+volumes:
+  rbac_postgres_data:
+    name: resolve_rbac_service_postgres_data

@@ -1,0 +1,35 @@
+# Integration Guide — User & Team Service
+
+The User & Team Service owns the `users`, `teams`, and `team_members` tables. It serves synchronous REST APIs only and publishes no events in the initial scope.
+
+## Service relationships
+
+- Organization Service is the upstream tenant authority. This service checks that an organization exists and is `ACTIVE` before creating a user or team.
+- Authentication calls only the protected internal lookup, credential verification, and password update endpoints. Password hashes stay in this service's database and are never returned.
+- RBAC permissions arrive as JWT permission claims. This service does not depend on a role name.
+- Work assignment and workflow services can use the internal user-by-id lookup to check user status.
+
+## Public request behavior
+
+Public API paths begin `/api/v1`; all require an access JWT. Its `tenantId` claim is the only tenant source, mapped to `organization_id`. Query/body organization IDs are ignored for scope. Cross-tenant IDs are indistinguishable from missing resources (404). Resource writes require relevant `IAM_USER_MANAGE` or `IAM_TEAM_MANAGE` claims. Read-only list operations allow view/manage claims. Owners may view their own profile and edit only their `fullName`; team members may read their team's details and member roster.
+
+All resource-creating POST requests require `Idempotency-Key`. The included in-process idempotency store is for single-instance development; production horizontal scaling requires shared durable storage.
+
+## Organization Service integration
+
+Configure `ORGANIZATION_SERVICE_URL` and `ORGANIZATION_SERVICE_TOKEN`. Before user/team creation the service requests `GET /internal/v1/organizations/{organizationId}` and proceeds only when the response is `{ "status": "ACTIVE", ... }`. Requests have a configurable short timeout. Missing or unreachable Organization Service fails closed with 503; unknown organizations return 404 and inactive organizations return 409. Verify the Organization Service's exact internal route/auth setup when deploying together.
+
+## Internal API authentication
+
+`/internal/v1` routes are never intended for the public gateway. They accept verified mutual TLS or an internal JWT signed with `INTERNAL_JWT_SECRET` and a non-empty `service` claim. An end-user bearer token is not accepted as a service credential.
+
+- `GET /internal/v1/users/lookup?organizationId=...&email=...` returns user ID and status.
+- `GET /internal/v1/users/{id}` returns profile identity and status.
+- `POST /internal/v1/users/{id}/verify-credentials` accepts plaintext only on the protected service network and returns a boolean/status; comparison uses bcrypt.
+- `PATCH /internal/v1/users/{id}/password-hash` accepts new plaintext on the protected service network, hashes locally, and returns no hash.
+
+Never log request bodies for credential endpoints. Never return `password_hash`.
+
+## Local development
+
+Use `.env.example`, run Postgres with Docker Compose, install dependencies, and run `npm test`. Jest's auth bypass is opt-in and only active in `NODE_ENV=test`.

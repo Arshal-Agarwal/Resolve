@@ -1,0 +1,432 @@
+openapi: 3.0.3
+info:
+  title: Resolve — Authentication Service API
+  version: 0.1.0
+  description: |
+    Synchronous REST API for the Authentication Service. No Kafka involvement,
+    no owned PostgreSQL table — all persisted state lives in Redis plus the
+    RS256 signing keypair. Source of truth for the contract this spec mirrors:
+    `Resolve_Documentation/Contracts/Authentication_Service.md`.
+
+    **x-status** on each path tells you whether it's live in this codebase yet:
+    - `implemented` — you can call it right now.
+    - `planned` — documented and frozen per the contract, not yet built. Listed
+      here anyway per FR-QA-03 ("OpenAPI spec exposed for all public
+      endpoints") and so dependent teams can build against the shape early.
+servers:
+  - url: http://localhost:4001
+    description: Local development
+tags:
+  - name: Health
+  - name: Auth
+  - name: MFA
+  - name: Token Settings
+  - name: JWKS
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      x-status: implemented
+      responses:
+        '200':
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: auth-service }
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe (checks Redis connectivity)
+      x-status: implemented
+      responses:
+        '200':
+          description: Redis reachable
+        '503':
+          description: Redis unreachable
+
+  /.well-known/jwks.json:
+    get:
+      tags: [JWKS]
+      summary: Public signing keys (RFC 7517), used by every other service to verify access tokens
+      x-status: implemented
+      security: []
+      responses:
+        '200':
+          description: JWKS document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Jwks'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate with email/password, scoped to a tenant
+      x-status: implemented
+      x-phase: 2 (Must)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Success — tokens issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '202':
+          description: MFA required; complete the second factor using the MFA verification endpoint.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaChallengeResponse' }
+        '401':
+          description: Invalid credentials (deliberately generic — never reveals which part failed)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Account disabled/suspended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new access/refresh pair (rotation)
+      x-status: implemented
+      x-phase: 2 (Must)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New token pair issued; old refresh token invalidated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          description: Refresh token invalid, expired, or already used
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current access token (and optionally its paired refresh token)
+      x-status: implemented
+      x-phase: 2 (Must)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  { type: string, description: 'Optional — also invalidates the paired refresh token' }
+      responses:
+        '204':
+          description: Revoked
+        '401':
+          description: Already-invalid token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/password-reset/request:
+    post:
+      tags: [Auth]
+      summary: Request a password-reset link (always 202 — never reveals account existence)
+      description: |
+        Generates and stores a single-use reset token when the account exists.
+        **Known gap (flagged in Contract §8):** this service has no synchronous
+        email/notification capability, so nothing is actually delivered to the
+        user yet — the token is only logged server-side for local dev/QA. This
+        is a cross-team dependency on Notification Service exposing a
+        synchronous send-email endpoint, not a bug in this service.
+      x-status: implemented
+      x-phase: 3 (Should)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, organizationSlug]
+              properties:
+                email: { type: string, format: email }
+                organizationSlug: { type: string }
+      responses:
+        '202':
+          description: Always returned regardless of whether the account exists
+
+  /api/v1/auth/password-reset/confirm:
+    post:
+      tags: [Auth]
+      summary: Complete a password reset using a single-use reset token
+      x-status: implemented
+      x-phase: 3 (Should)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resetToken, newPassword]
+              properties:
+                resetToken: { type: string }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '204':
+          description: Password updated; reset token consumed
+        '400':
+          description: Reset token invalid, expired, or already used
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/mfa/status:
+    get:
+      tags: [MFA]
+      summary: Get the authenticated user's MFA status
+      x-status: implemented
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: MFA enrollment status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+                  enabledAt: { type: string, format: date-time, nullable: true }
+
+  /api/v1/auth/mfa/enroll:
+    post:
+      tags: [MFA]
+      summary: Begin TOTP enrollment
+      description: |
+        Generates a one-time enrollment secret and otpauth URI. The secret is
+        pending for 10 minutes and MFA is not enabled until enroll/confirm succeeds.
+        This version returns the provisioning URI and manual-entry key. A client
+        can render the URI as a QR code; never log or share this response.
+      x-status: implemented
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: TOTP enrollment material
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauthUrl, expiresIn]
+                properties:
+                  secret: { type: string, description: Base32 secret for manual entry }
+                  otpauthUrl: { type: string, description: Standard TOTP provisioning URI }
+                  expiresIn: { type: integer, example: 600 }
+                  setupInstructions: { type: string }
+        '409':
+          description: MFA is already enabled
+
+  /api/v1/auth/mfa/enroll/confirm:
+    post:
+      tags: [MFA]
+      summary: Confirm enrollment with a valid TOTP code
+      x-status: implemented
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^\\d{6}$', example: '482913' }
+      responses:
+        '204':
+          description: MFA enabled
+        '401':
+          description: Invalid TOTP code or expired enrollment
+
+  /api/v1/auth/mfa/verify:
+    post:
+      tags: [MFA]
+      summary: Complete login by verifying a TOTP challenge
+      x-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfaChallengeToken, code]
+              properties:
+                mfaChallengeToken: { type: string }
+                code: { type: string, pattern: '^\\d{6}$' }
+      responses:
+        '200':
+          description: Normal access and refresh token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          description: Invalid code or expired challenge
+
+  /api/v1/auth/mfa/disable:
+    post:
+      tags: [MFA]
+      summary: Disable MFA after password and current TOTP reauthentication
+      x-status: implemented
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, code]
+              properties:
+                currentPassword: { type: string, format: password }
+                code: { type: string, pattern: '^\\d{6}$' }
+      responses:
+        '204':
+          description: MFA disabled
+        '401':
+          description: Reauthentication or TOTP failed
+
+  /api/v1/auth/token-settings:
+    get:
+      tags: [Token Settings]
+      summary: Get this tenant's access/refresh token TTL overrides
+      x-status: implemented
+      x-phase: 4 (Could)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Current settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenSettings' }
+        '403':
+          description: Missing AUTH_SETTINGS_MANAGE permission (checked via RBAC Service)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    patch:
+      tags: [Token Settings]
+      summary: Update this tenant's access token TTL (requires AUTH_SETTINGS_MANAGE, checked via RBAC Service)
+      x-status: implemented
+      x-phase: 4 (Could)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessTokenTtlSeconds]
+              properties:
+                accessTokenTtlSeconds: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenSettings' }
+        '403':
+          description: Missing AUTH_SETTINGS_MANAGE permission
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: AUTH_INVALID_CREDENTIALS }
+            message: { type: string }
+            details: { type: object, nullable: true }
+            requestId: { type: string }
+            traceId: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password, organizationSlug]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        organizationSlug: { type: string, example: acme-bank }
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken: { type: string, description: 'RS256 JWT, see Contracts §3 for claim shape' }
+        refreshToken: { type: string, description: 'Opaque UUID, not a JWT' }
+        tokenType: { type: string, example: Bearer }
+        expiresIn: { type: integer, example: 3600 }
+
+    MfaChallengeResponse:
+      type: object
+      properties:
+        mfaRequired: { type: boolean, example: true }
+        mfaChallengeToken: { type: string }
+        expiresIn: { type: integer, example: 300 }
+
+    TokenSettings:
+      type: object
+      properties:
+        organizationId: { type: string, format: uuid }
+        accessTokenTtlSeconds: { type: integer }
+        refreshTokenTtlSeconds: { type: integer }
+
+    Jwks:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            properties:
+              kty: { type: string, example: RSA }
+              kid: { type: string }
+              use: { type: string, example: sig }
+              alg: { type: string, example: RS256 }
+              n: { type: string }
+              e: { type: string }

@@ -1,0 +1,46 @@
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - auth_redis_data:/data
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mocks:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ['node', 'mocks/server.js']
+    ports:
+      - '4100:4100'
+      - '4200:4200'
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '4001:4001'
+    environment:
+      - PORT=4001
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - USE_MOCKS=true
+      - USER_TEAM_SERVICE_URL=http://mocks:4100
+      - ORGANIZATION_SERVICE_URL=http://mocks:4200
+      - MFA_ENCRYPTION_KEY=${MFA_ENCRYPTION_KEY}
+      - MFA_ISSUER=${MFA_ISSUER:-Resolve}
+    depends_on:
+      redis:
+        condition: service_healthy
+      mocks:
+        condition: service_started
+
+volumes:
+  auth_redis_data:
+    name: resolve_auth_redis_data

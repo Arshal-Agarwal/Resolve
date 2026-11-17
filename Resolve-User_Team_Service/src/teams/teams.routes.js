@@ -1,0 +1,17 @@
+const express = require('express');
+const { asyncHandler } = require('../utils/asyncHandler');
+const { idempotencyMiddleware } = require('../middleware/idempotency');
+const { authenticate } = require('../middleware/authenticate');
+const { authorize, authorizeTeamManage } = require('../middleware/authorize');
+const controller = require('./teams.controller');
+const { validateCreateTeam, validatePatchTeam, validateAddMember, validateTeamIdParam, validateMemberUserIdParam } = require('./teams.validation');
+const router = express.Router();
+router.post('/', authenticate, authorizeTeamManage, validateCreateTeam, idempotencyMiddleware, asyncHandler(controller.createTeam));
+router.get('/', authenticate, authorize('IAM_TEAM_MANAGE', 'IAM_TEAM_VIEW'), asyncHandler(controller.listTeams));
+router.get('/:id', authenticate, validateTeamIdParam, asyncHandler(controller.getTeamById));
+router.patch('/:id', authenticate, authorizeTeamManage, validateTeamIdParam, validatePatchTeam, asyncHandler(controller.patchTeam));
+router.delete('/:id', authenticate, authorizeTeamManage, validateTeamIdParam, asyncHandler(controller.deleteTeam));
+router.post('/:id/members', authenticate, authorizeTeamManage, validateTeamIdParam, validateAddMember, idempotencyMiddleware, asyncHandler(controller.addMember));
+router.get('/:id/members', authenticate, validateTeamIdParam, asyncHandler(controller.listMembers));
+router.delete('/:id/members/:userId', authenticate, authorizeTeamManage, validateTeamIdParam, validateMemberUserIdParam, asyncHandler(controller.deleteMember));
+module.exports = router;
