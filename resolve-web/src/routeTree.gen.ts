@@ -11,10 +11,17 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OrganizationRouteImport } from './routes/organization'
+import { Route as ApprovalsIndexRouteImport } from './routes/approvals.index'
+import { Route as AuditIndexRouteImport } from './routes/audit.index'
 import { Route as CasesIndexRouteImport } from './routes/cases.index'
 import { Route as CasesIdRouteImport } from './routes/cases.$id'
+import { Route as DocumentsIndexRouteImport } from './routes/documents.index'
+import { Route as TasksIndexRouteImport } from './routes/tasks.index'
+import { Route as TeamsIndexRouteImport } from './routes/teams.index'
+import { Route as UsersIndexRouteImport } from './routes/users.index'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows.index'
 import { Route as WorkflowsIdRouteImport } from './routes/workflows.$id'
+import { Route as RbacRolesIndexRouteImport } from './routes/rbac.roles.index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -24,6 +31,16 @@ const IndexRoute = IndexRouteImport.update({
 const OrganizationRoute = OrganizationRouteImport.update({
   id: '/organization',
   path: '/organization',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApprovalsIndexRoute = ApprovalsIndexRouteImport.update({
+  id: '/approvals/',
+  path: '/approvals/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditIndexRoute = AuditIndexRouteImport.update({
+  id: '/audit/',
+  path: '/audit/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CasesIndexRoute = CasesIndexRouteImport.update({
@@ -36,6 +53,26 @@ const CasesIdRoute = CasesIdRouteImport.update({
   path: '/cases/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocumentsIndexRoute = DocumentsIndexRouteImport.update({
+  id: '/documents/',
+  path: '/documents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TasksIndexRoute = TasksIndexRouteImport.update({
+  id: '/tasks/',
+  path: '/tasks/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeamsIndexRoute = TeamsIndexRouteImport.update({
+  id: '/teams/',
+  path: '/teams/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsersIndexRoute = UsersIndexRouteImport.update({
+  id: '/users/',
+  path: '/users/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
   id: '/workflows/',
   path: '/workflows/',
@@ -46,22 +83,41 @@ const WorkflowsIdRoute = WorkflowsIdRouteImport.update({
   path: '/workflows/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RbacRolesIndexRoute = RbacRolesIndexRouteImport.update({
+  id: '/rbac/roles/',
+  path: '/rbac/roles/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/organization': typeof OrganizationRoute
   '/cases/$id': typeof CasesIdRoute
   '/workflows/$id': typeof WorkflowsIdRoute
+  '/approvals/': typeof ApprovalsIndexRoute
+  '/audit/': typeof AuditIndexRoute
   '/cases/': typeof CasesIndexRoute
+  '/documents/': typeof DocumentsIndexRoute
+  '/tasks/': typeof TasksIndexRoute
+  '/teams/': typeof TeamsIndexRoute
+  '/users/': typeof UsersIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/rbac/roles/': typeof RbacRolesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/organization': typeof OrganizationRoute
   '/cases/$id': typeof CasesIdRoute
   '/workflows/$id': typeof WorkflowsIdRoute
+  '/approvals': typeof ApprovalsIndexRoute
+  '/audit': typeof AuditIndexRoute
   '/cases': typeof CasesIndexRoute
+  '/documents': typeof DocumentsIndexRoute
+  '/tasks': typeof TasksIndexRoute
+  '/teams': typeof TeamsIndexRoute
+  '/users': typeof UsersIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
+  '/rbac/roles': typeof RbacRolesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -69,8 +125,15 @@ export interface FileRoutesById {
   '/organization': typeof OrganizationRoute
   '/cases/$id': typeof CasesIdRoute
   '/workflows/$id': typeof WorkflowsIdRoute
+  '/approvals/': typeof ApprovalsIndexRoute
+  '/audit/': typeof AuditIndexRoute
   '/cases/': typeof CasesIndexRoute
+  '/documents/': typeof DocumentsIndexRoute
+  '/tasks/': typeof TasksIndexRoute
+  '/teams/': typeof TeamsIndexRoute
+  '/users/': typeof UsersIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/rbac/roles/': typeof RbacRolesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -79,24 +142,45 @@ export interface FileRouteTypes {
     | '/organization'
     | '/cases/$id'
     | '/workflows/$id'
+    | '/approvals/'
+    | '/audit/'
     | '/cases/'
+    | '/documents/'
+    | '/tasks/'
+    | '/teams/'
+    | '/users/'
     | '/workflows/'
+    | '/rbac/roles/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/organization'
     | '/cases/$id'
     | '/workflows/$id'
+    | '/approvals'
+    | '/audit'
     | '/cases'
+    | '/documents'
+    | '/tasks'
+    | '/teams'
+    | '/users'
     | '/workflows'
+    | '/rbac/roles'
   id:
     | '__root__'
     | '/'
     | '/organization'
     | '/cases/$id'
     | '/workflows/$id'
+    | '/approvals/'
+    | '/audit/'
     | '/cases/'
+    | '/documents/'
+    | '/tasks/'
+    | '/teams/'
+    | '/users/'
     | '/workflows/'
+    | '/rbac/roles/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -104,8 +188,15 @@ export interface RootRouteChildren {
   OrganizationRoute: typeof OrganizationRoute
   CasesIdRoute: typeof CasesIdRoute
   WorkflowsIdRoute: typeof WorkflowsIdRoute
+  ApprovalsIndexRoute: typeof ApprovalsIndexRoute
+  AuditIndexRoute: typeof AuditIndexRoute
   CasesIndexRoute: typeof CasesIndexRoute
+  DocumentsIndexRoute: typeof DocumentsIndexRoute
+  TasksIndexRoute: typeof TasksIndexRoute
+  TeamsIndexRoute: typeof TeamsIndexRoute
+  UsersIndexRoute: typeof UsersIndexRoute
   WorkflowsIndexRoute: typeof WorkflowsIndexRoute
+  RbacRolesIndexRoute: typeof RbacRolesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -124,6 +215,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/approvals/': {
+      id: '/approvals/'
+      path: '/approvals'
+      fullPath: '/approvals/'
+      preLoaderRoute: typeof ApprovalsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit/': {
+      id: '/audit/'
+      path: '/audit'
+      fullPath: '/audit/'
+      preLoaderRoute: typeof AuditIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cases/': {
       id: '/cases/'
       path: '/cases'
@@ -136,6 +241,34 @@ declare module '@tanstack/react-router' {
       path: '/cases/$id'
       fullPath: '/cases/$id'
       preLoaderRoute: typeof CasesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents/': {
+      id: '/documents/'
+      path: '/documents'
+      fullPath: '/documents/'
+      preLoaderRoute: typeof DocumentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tasks/': {
+      id: '/tasks/'
+      path: '/tasks'
+      fullPath: '/tasks/'
+      preLoaderRoute: typeof TasksIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/teams/': {
+      id: '/teams/'
+      path: '/teams'
+      fullPath: '/teams/'
+      preLoaderRoute: typeof TeamsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/users/': {
+      id: '/users/'
+      path: '/users'
+      fullPath: '/users/'
+      preLoaderRoute: typeof UsersIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workflows/': {
@@ -152,6 +285,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rbac/roles/': {
+      id: '/rbac/roles/'
+      path: '/rbac/roles'
+      fullPath: '/rbac/roles/'
+      preLoaderRoute: typeof RbacRolesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -160,8 +300,15 @@ const rootRouteChildren: RootRouteChildren = {
   OrganizationRoute: OrganizationRoute,
   CasesIdRoute: CasesIdRoute,
   WorkflowsIdRoute: WorkflowsIdRoute,
+  ApprovalsIndexRoute: ApprovalsIndexRoute,
+  AuditIndexRoute: AuditIndexRoute,
   CasesIndexRoute: CasesIndexRoute,
+  DocumentsIndexRoute: DocumentsIndexRoute,
+  TasksIndexRoute: TasksIndexRoute,
+  TeamsIndexRoute: TeamsIndexRoute,
+  UsersIndexRoute: UsersIndexRoute,
   WorkflowsIndexRoute: WorkflowsIndexRoute,
+  RbacRolesIndexRoute: RbacRolesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

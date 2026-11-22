@@ -50,6 +50,7 @@ export interface CaseRecord {
   priority: "low" | "medium" | "high";
   owner: string;
   completed: string[];
+  stageConviction?: string;
   createdAt: string;
 }
 
@@ -68,7 +69,18 @@ export interface AuditEvent {
   caseId: string;
   actor: string;
   action: string;
-  resourceType: "case" | "task" | "approval" | "document" | "comment" | "stage";
+  resourceType:
+    | "case"
+    | "task"
+    | "approval"
+    | "document"
+    | "comment"
+    | "stage"
+    | "organization"
+    | "user"
+    | "team"
+    | "role";
+  resourceId: string;
   details: string;
   timestamp: string;
 }
@@ -81,7 +93,7 @@ export interface DocumentRecord {
   sizeBytes: number;
   uploadedBy: string;
   createdAt: string;
-  scanStatus: "clean" | "pending";
+  scanStatus: "clean" | "pending" | "infected" | "failed";
 }
 
 export interface Notification {
@@ -109,16 +121,76 @@ export interface Team {
   description: string;
 }
 
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: "ACTIVE" | "SUSPENDED";
+  createdAt: string;
+}
+
+export interface ServiceStatus {
+  name: string;
+  status: "operational" | "degraded" | "offline";
+  detail: string;
+}
+
+export interface PrototypeToast {
+  id: string;
+  title: string;
+  description: string;
+  tone: "success" | "info" | "danger";
+}
+
 export interface ApprovalRequest {
   id: string;
   caseId: string;
   requestedBy: string;
   approver: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "expired";
   reason: string;
   decisionNotes: string | null;
   createdAt: string;
   decidedAt: string | null;
+  expiresAt: string | null;
+}
+
+export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
+
+export interface TaskRecord {
+  id: string;
+  caseId: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: "low" | "medium" | "high";
+  assignee: string;
+  assigneeTeamId: string | null;
+  dueDate: string | null;
+  requiredForStage: boolean;
+  dependsOnTaskId: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface Permission {
+  id: string;
+  code: string;
+  description: string;
+}
+
+export interface RoleRecord {
+  id: string;
+  name: string;
+  description: string;
+  isSystemRole: boolean;
+  permissionIds: string[];
+}
+
+export interface UserRoleAssignment {
+  userId: string;
+  roleId: string;
+  assignedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +198,8 @@ export interface ApprovalRequest {
 // ---------------------------------------------------------------------------
 
 interface StoreShape {
+  organizations: Organization[];
+  selectedOrganizationId: string;
   workflows: Workflow[];
   cases: CaseRecord[];
   comments: Comment[];
@@ -135,9 +209,16 @@ interface StoreShape {
   users: User[];
   teams: Team[];
   approvals: ApprovalRequest[];
+  tasks: TaskRecord[];
+  permissions: Permission[];
+  roles: RoleRecord[];
+  userRoleAssignments: UserRoleAssignment[];
+  serviceStatuses: ServiceStatus[];
+  toast: PrototypeToast | null;
+  busyAction: string | null;
 }
 
-const KEY = "resolve.store.v2";
+const KEY = "resolve.store.v3";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -149,14 +230,80 @@ function seed(): StoreShape {
   const now = Date.now();
   const iso = (offsetMin: number) => new Date(now - offsetMin * 60_000).toISOString();
 
+  const organizations: Organization[] = [
+    {
+      id: "org-acme",
+      name: "Acme Bank",
+      slug: "acme-bank",
+      status: "ACTIVE",
+      createdAt: iso(525600),
+    },
+    {
+      id: "org-northstar",
+      name: "Northstar Legal",
+      slug: "northstar-legal",
+      status: "ACTIVE",
+      createdAt: iso(438000),
+    },
+  ];
+
   const users: User[] = [
-    { id: "u-1", name: "R. Okafor", email: "okafor@resolve.io", role: "Administrator", status: "active", teamId: "t-1" },
-    { id: "u-2", name: "M. Silva", email: "silva@resolve.io", role: "Investigator", status: "active", teamId: "t-2" },
-    { id: "u-3", name: "A. Kul", email: "kul@resolve.io", role: "Reviewer", status: "active", teamId: "t-1" },
-    { id: "u-4", name: "J. Reyes", email: "reyes@resolve.io", role: "Manager", status: "active", teamId: "t-3" },
-    { id: "u-5", name: "D. Patel", email: "patel@resolve.io", role: "Investigator", status: "active", teamId: "t-2" },
-    { id: "u-6", name: "L. Chen", email: "chen@resolve.io", role: "Reviewer", status: "active", teamId: "t-3" },
-    { id: "u-7", name: "S. Muller", email: "mueller@resolve.io", role: "Investigator", status: "disabled", teamId: null },
+    {
+      id: "u-1",
+      name: "R. Okafor",
+      email: "okafor@resolve.io",
+      role: "Administrator",
+      status: "active",
+      teamId: "t-1",
+    },
+    {
+      id: "u-2",
+      name: "M. Silva",
+      email: "silva@resolve.io",
+      role: "Investigator",
+      status: "active",
+      teamId: "t-2",
+    },
+    {
+      id: "u-3",
+      name: "A. Kul",
+      email: "kul@resolve.io",
+      role: "Reviewer",
+      status: "active",
+      teamId: "t-1",
+    },
+    {
+      id: "u-4",
+      name: "J. Reyes",
+      email: "reyes@resolve.io",
+      role: "Manager",
+      status: "active",
+      teamId: "t-3",
+    },
+    {
+      id: "u-5",
+      name: "D. Patel",
+      email: "patel@resolve.io",
+      role: "Investigator",
+      status: "active",
+      teamId: "t-2",
+    },
+    {
+      id: "u-6",
+      name: "L. Chen",
+      email: "chen@resolve.io",
+      role: "Reviewer",
+      status: "active",
+      teamId: "t-3",
+    },
+    {
+      id: "u-7",
+      name: "S. Muller",
+      email: "mueller@resolve.io",
+      role: "Investigator",
+      status: "disabled",
+      teamId: null,
+    },
   ];
 
   const teams: Team[] = [
@@ -166,160 +313,816 @@ function seed(): StoreShape {
   ];
 
   const wf1: Workflow = {
-    id: "wf-investigation", name: "Investigation",
+    id: "wf-investigation",
+    name: "Investigation",
     description: "Standard investigation flow with lead sign-off before review.",
-    status: "active", createdAt: iso(60000),
+    status: "active",
+    createdAt: iso(60000),
     stages: [
-      { id: "st-1", name: "Created", description: "Case opened and triaged", nodes: [
-        { id: "n-1", kind: "task", title: "Log incident details", parentId: null },
-        { id: "n-2", kind: "task", title: "Tag severity level", parentId: "n-1" },
-      ]},
-      { id: "st-2", name: "Assigned to Investigator", description: "Ownership and SLA set", nodes: [
-        { id: "n-3", kind: "task", title: "Select lead investigator", parentId: null },
-        { id: "n-4", kind: "task", title: "Set SLA deadline", parentId: null },
-      ]},
-      { id: "st-3", name: "Investigation", description: "Evidence gathering and findings", nodes: [
-        { id: "n-5", kind: "task", title: "Collect evidence logs", parentId: null },
-        { id: "n-6", kind: "task", title: "Interview subject", parentId: "n-5" },
-        { id: "n-7", kind: "approval", title: "Lead sign-off", parentId: null },
-      ]},
-      { id: "st-4", name: "Submitted for Review", description: "Packaged for manager review", nodes: [
-        { id: "n-8", kind: "approval", title: "Manager approval", parentId: null },
-      ]},
-      { id: "st-5", name: "Resolved", description: "Audit trail sealed", nodes: [
-        { id: "n-9", kind: "task", title: "Archive case file", parentId: null },
-      ]},
+      {
+        id: "st-1",
+        name: "Created",
+        description: "Case opened and triaged",
+        nodes: [
+          { id: "n-1", kind: "task", title: "Log incident details", parentId: null },
+          { id: "n-2", kind: "task", title: "Tag severity level", parentId: "n-1" },
+        ],
+      },
+      {
+        id: "st-2",
+        name: "Assigned to Investigator",
+        description: "Ownership and SLA set",
+        nodes: [
+          { id: "n-3", kind: "task", title: "Select lead investigator", parentId: null },
+          { id: "n-4", kind: "task", title: "Set SLA deadline", parentId: null },
+        ],
+      },
+      {
+        id: "st-3",
+        name: "Investigation",
+        description: "Evidence gathering and findings",
+        nodes: [
+          { id: "n-5", kind: "task", title: "Collect evidence logs", parentId: null },
+          { id: "n-6", kind: "task", title: "Interview subject", parentId: "n-5" },
+          { id: "n-7", kind: "approval", title: "Lead sign-off", parentId: null },
+        ],
+      },
+      {
+        id: "st-4",
+        name: "Submitted for Review",
+        description: "Packaged for manager review",
+        nodes: [{ id: "n-8", kind: "approval", title: "Manager approval", parentId: null }],
+      },
+      {
+        id: "st-5",
+        name: "Resolved",
+        description: "Audit trail sealed",
+        nodes: [{ id: "n-9", kind: "task", title: "Archive case file", parentId: null }],
+      },
     ],
   };
 
   const wf2: Workflow = {
-    id: "wf-dispute", name: "Payment Dispute",
+    id: "wf-dispute",
+    name: "Payment Dispute",
     description: "Chargeback handling with finance approval.",
-    status: "draft", createdAt: iso(50000),
+    status: "draft",
+    createdAt: iso(50000),
     stages: [
-      { id: "st-d1", name: "Intake", description: "Dispute logged", nodes: [
-        { id: "n-d1", kind: "task", title: "Capture transaction reference", parentId: null },
-      ]},
-      { id: "st-d2", name: "Finance Review", description: "Amount verified", nodes: [
-        { id: "n-d2", kind: "task", title: "Verify ledger entry", parentId: null },
-        { id: "n-d3", kind: "approval", title: "Finance sign-off", parentId: null },
-      ]},
-      { id: "st-d3", name: "Closed", description: "Outcome recorded", nodes: [
-        { id: "n-d4", kind: "task", title: "Notify customer", parentId: null },
-      ]},
+      {
+        id: "st-d1",
+        name: "Intake",
+        description: "Dispute logged",
+        nodes: [
+          { id: "n-d1", kind: "task", title: "Capture transaction reference", parentId: null },
+        ],
+      },
+      {
+        id: "st-d2",
+        name: "Finance Review",
+        description: "Amount verified",
+        nodes: [
+          { id: "n-d2", kind: "task", title: "Verify ledger entry", parentId: null },
+          { id: "n-d3", kind: "approval", title: "Finance sign-off", parentId: null },
+        ],
+      },
+      {
+        id: "st-d3",
+        name: "Closed",
+        description: "Outcome recorded",
+        nodes: [{ id: "n-d4", kind: "task", title: "Notify customer", parentId: null }],
+      },
     ],
   };
 
   const wf3: Workflow = {
-    id: "wf-audit", name: "Compliance Audit",
+    id: "wf-audit",
+    name: "Compliance Audit",
     description: "Quarterly compliance audit with multi-stage sign-off.",
-    status: "active", createdAt: iso(40000),
+    status: "active",
+    createdAt: iso(40000),
     stages: [
-      { id: "st-a1", name: "Planning", description: "Scope and timeline", nodes: [
-        { id: "n-a1", kind: "task", title: "Define audit scope", parentId: null },
-        { id: "n-a2", kind: "task", title: "Assign audit team", parentId: null },
-      ]},
-      { id: "st-a2", name: "Fieldwork", description: "Evidence collection", nodes: [
-        { id: "n-a3", kind: "task", title: "Collect control evidence", parentId: null },
-        { id: "n-a4", kind: "task", title: "Interview process owners", parentId: null },
-        { id: "n-a5", kind: "approval", title: "Lead auditor sign-off", parentId: null },
-      ]},
-      { id: "st-a3", name: "Reporting", description: "Findings and recommendations", nodes: [
-        { id: "n-a6", kind: "task", title: "Draft audit report", parentId: null },
-        { id: "n-a7", kind: "approval", title: "Committee approval", parentId: null },
-      ]},
-      { id: "st-a4", name: "Closed", description: "Remediation tracked", nodes: [
-        { id: "n-a8", kind: "task", title: "Log remediation actions", parentId: null },
-      ]},
+      {
+        id: "st-a1",
+        name: "Planning",
+        description: "Scope and timeline",
+        nodes: [
+          { id: "n-a1", kind: "task", title: "Define audit scope", parentId: null },
+          { id: "n-a2", kind: "task", title: "Assign audit team", parentId: null },
+        ],
+      },
+      {
+        id: "st-a2",
+        name: "Fieldwork",
+        description: "Evidence collection",
+        nodes: [
+          { id: "n-a3", kind: "task", title: "Collect control evidence", parentId: null },
+          { id: "n-a4", kind: "task", title: "Interview process owners", parentId: null },
+          { id: "n-a5", kind: "approval", title: "Lead auditor sign-off", parentId: null },
+        ],
+      },
+      {
+        id: "st-a3",
+        name: "Reporting",
+        description: "Findings and recommendations",
+        nodes: [
+          { id: "n-a6", kind: "task", title: "Draft audit report", parentId: null },
+          { id: "n-a7", kind: "approval", title: "Committee approval", parentId: null },
+        ],
+      },
+      {
+        id: "st-a4",
+        name: "Closed",
+        description: "Remediation tracked",
+        nodes: [{ id: "n-a8", kind: "task", title: "Log remediation actions", parentId: null }],
+      },
     ],
   };
 
   const cases: CaseRecord[] = [
-    { id: "c-1", ref: "CASE-2041", title: "Vendor dispute — Acme Corp invoice #4421",
+    {
+      id: "c-1",
+      ref: "CASE-2041",
+      title: "Vendor dispute — Acme Corp invoice #4421",
       summary: "Supplier invoice mismatch flagged by finance ops. Amount: $48,200.",
-      workflowId: wf1.id, stageIndex: 2, status: "in_review", priority: "high",
-      owner: "R. Okafor", completed: ["n-1","n-2","n-3","n-4","n-5"], createdAt: iso(4320) },
-    { id: "c-2", ref: "CASE-2042", title: "Server breach — region eu-west",
+      workflowId: wf1.id,
+      stageIndex: 2,
+      status: "in_review",
+      priority: "high",
+      owner: "R. Okafor",
+      completed: ["n-1", "n-2", "n-3", "n-4", "n-5"],
+      createdAt: iso(4320),
+    },
+    {
+      id: "c-2",
+      ref: "CASE-2042",
+      title: "Server breach — region eu-west",
       summary: "Unusual access pattern detected on production cluster at 03:14 UTC.",
-      workflowId: wf1.id, stageIndex: 1, status: "open", priority: "high",
-      owner: "M. Silva", completed: ["n-1","n-2"], createdAt: iso(2880) },
-    { id: "c-3", ref: "CASE-2043", title: "Duplicate card charge — order #88231",
+      workflowId: wf1.id,
+      stageIndex: 1,
+      status: "open",
+      priority: "high",
+      owner: "M. Silva",
+      completed: ["n-1", "n-2"],
+      createdAt: iso(2880),
+    },
+    {
+      id: "c-3",
+      ref: "CASE-2043",
+      title: "Duplicate card charge — order #88231",
       summary: "Customer charged twice for a single order. Refund pending finance approval.",
-      workflowId: wf2.id, stageIndex: 1, status: "blocked", priority: "medium",
-      owner: "A. Kul", completed: ["n-d1"], createdAt: iso(1440) },
-    { id: "c-4", ref: "CASE-2044", title: "Q3 compliance audit — vendor onboarding",
+      workflowId: wf2.id,
+      stageIndex: 1,
+      status: "blocked",
+      priority: "medium",
+      owner: "A. Kul",
+      completed: ["n-d1"],
+      createdAt: iso(1440),
+    },
+    {
+      id: "c-4",
+      ref: "CASE-2044",
+      title: "Q3 compliance audit — vendor onboarding",
       summary: "Quarterly compliance audit of new vendor onboarding procedures.",
-      workflowId: wf3.id, stageIndex: 1, status: "open", priority: "medium",
-      owner: "D. Patel", completed: ["n-a1"], createdAt: iso(720) },
-    { id: "c-5", ref: "CASE-2045", title: "Phishing report — finance department",
+      workflowId: wf3.id,
+      stageIndex: 1,
+      status: "open",
+      priority: "medium",
+      owner: "D. Patel",
+      completed: ["n-a1"],
+      createdAt: iso(720),
+    },
+    {
+      id: "c-5",
+      ref: "CASE-2045",
+      title: "Phishing report — finance department",
       summary: "Three employees reported receiving phishing emails impersonating the CFO.",
-      workflowId: wf1.id, stageIndex: 0, status: "open", priority: "high",
-      owner: "M. Silva", completed: [], createdAt: iso(180) },
-    { id: "c-6", ref: "CASE-2040", title: "Insider trading allegation — Q2",
+      workflowId: wf1.id,
+      stageIndex: 0,
+      status: "open",
+      priority: "high",
+      owner: "M. Silva",
+      completed: [],
+      createdAt: iso(180),
+    },
+    {
+      id: "c-6",
+      ref: "CASE-2040",
+      title: "Insider trading allegation — Q2",
       summary: "Flagged by surveillance system. Investigation completed, case archived.",
-      workflowId: wf1.id, stageIndex: 4, status: "resolved", priority: "high",
-      owner: "R. Okafor", completed: ["n-1","n-2","n-3","n-4","n-5","n-6","n-7","n-8","n-9"], createdAt: iso(10000) },
+      workflowId: wf1.id,
+      stageIndex: 4,
+      status: "resolved",
+      priority: "high",
+      owner: "R. Okafor",
+      completed: ["n-1", "n-2", "n-3", "n-4", "n-5", "n-6", "n-7", "n-8", "n-9"],
+      createdAt: iso(10000),
+    },
   ];
 
   const comments: Comment[] = [
-    { id: "cm-1", caseId: "c-1", author: "R. Okafor", body: "Finance confirmed the invoice discrepancy. Vendor was overcharging for Q3 services.", parentId: null, createdAt: iso(3000), isEdited: false },
-    { id: "cm-2", caseId: "c-1", author: "J. Reyes", body: "Good catch. Let's escalate this to the vendor relationship team after sign-off.", parentId: "cm-1", createdAt: iso(2880), isEdited: false },
-    { id: "cm-3", caseId: "c-1", author: "R. Okafor", body: "Evidence package is ready for review. Includes email trail and ledger screenshots.", parentId: null, createdAt: iso(1200), isEdited: false },
-    { id: "cm-4", caseId: "c-2", author: "M. Silva", body: "IP addresses trace to a known botnet range. Isolating the affected nodes now.", parentId: null, createdAt: iso(2400), isEdited: false },
-    { id: "cm-5", caseId: "c-2", author: "D. Patel", body: "I can help with the forensic analysis. Sending you the log extraction tool.", parentId: "cm-4", createdAt: iso(2100), isEdited: false },
-    { id: "cm-6", caseId: "c-3", author: "A. Kul", body: "Blocked on finance sign-off. The ledger entry has a discrepancy of $89.50 that needs clarification first.", parentId: null, createdAt: iso(600), isEdited: false },
-    { id: "cm-7", caseId: "c-5", author: "M. Silva", body: "Initial triage: all three emails share the same sender domain. Likely a coordinated campaign.", parentId: null, createdAt: iso(90), isEdited: false },
+    {
+      id: "cm-1",
+      caseId: "c-1",
+      author: "R. Okafor",
+      body: "Finance confirmed the invoice discrepancy. Vendor was overcharging for Q3 services.",
+      parentId: null,
+      createdAt: iso(3000),
+      isEdited: false,
+    },
+    {
+      id: "cm-2",
+      caseId: "c-1",
+      author: "J. Reyes",
+      body: "Good catch. Let's escalate this to the vendor relationship team after sign-off.",
+      parentId: "cm-1",
+      createdAt: iso(2880),
+      isEdited: false,
+    },
+    {
+      id: "cm-3",
+      caseId: "c-1",
+      author: "R. Okafor",
+      body: "Evidence package is ready for review. Includes email trail and ledger screenshots.",
+      parentId: null,
+      createdAt: iso(1200),
+      isEdited: false,
+    },
+    {
+      id: "cm-4",
+      caseId: "c-2",
+      author: "M. Silva",
+      body: "IP addresses trace to a known botnet range. Isolating the affected nodes now.",
+      parentId: null,
+      createdAt: iso(2400),
+      isEdited: false,
+    },
+    {
+      id: "cm-5",
+      caseId: "c-2",
+      author: "D. Patel",
+      body: "I can help with the forensic analysis. Sending you the log extraction tool.",
+      parentId: "cm-4",
+      createdAt: iso(2100),
+      isEdited: false,
+    },
+    {
+      id: "cm-6",
+      caseId: "c-3",
+      author: "A. Kul",
+      body: "Blocked on finance sign-off. The ledger entry has a discrepancy of $89.50 that needs clarification first.",
+      parentId: null,
+      createdAt: iso(600),
+      isEdited: false,
+    },
+    {
+      id: "cm-7",
+      caseId: "c-5",
+      author: "M. Silva",
+      body: "Initial triage: all three emails share the same sender domain. Likely a coordinated campaign.",
+      parentId: null,
+      createdAt: iso(90),
+      isEdited: false,
+    },
   ];
 
   const auditEvents: AuditEvent[] = [
-    { id: "ae-1", caseId: "c-1", actor: "R. Okafor", action: "Case created", resourceType: "case", resourceId: "c-1", details: "Case opened with priority HIGH", timestamp: iso(4320) },
-    { id: "ae-2", caseId: "c-1", actor: "R. Okafor", action: "Task completed", resourceType: "task", resourceId: "n-1", details: "Log incident details", timestamp: iso(4200) },
-    { id: "ae-3", caseId: "c-1", actor: "R. Okafor", action: "Task completed", resourceType: "task", resourceId: "n-2", details: "Tag severity level", timestamp: iso(4150) },
-    { id: "ae-4", caseId: "c-1", actor: "R. Okafor", action: "Stage advanced", resourceType: "stage", resourceId: "st-2", details: "Moved to: Assigned to Investigator", timestamp: iso(4000) },
-    { id: "ae-5", caseId: "c-1", actor: "R. Okafor", action: "Task completed", resourceType: "task", resourceId: "n-3", details: "Select lead investigator", timestamp: iso(3800) },
-    { id: "ae-6", caseId: "c-1", actor: "R. Okafor", action: "Stage advanced", resourceType: "stage", resourceId: "st-3", details: "Moved to: Investigation", timestamp: iso(3500) },
-    { id: "ae-7", caseId: "c-1", actor: "R. Okafor", action: "Task completed", resourceType: "task", resourceId: "n-5", details: "Collect evidence logs", timestamp: iso(3000) },
-    { id: "ae-8", caseId: "c-1", actor: "R. Okafor", action: "Comment added", resourceType: "comment", resourceId: "cm-1", details: "Finance confirmed the invoice discrepancy", timestamp: iso(3000) },
-    { id: "ae-9", caseId: "c-1", actor: "J. Reyes", action: "Comment added", resourceType: "comment", resourceId: "cm-2", details: "Escalate to vendor relationship team", timestamp: iso(2880) },
-    { id: "ae-10", caseId: "c-1", actor: "R. Okafor", action: "Approval requested", resourceType: "approval", resourceId: "ap-1", details: "Lead sign-off requested from J. Reyes", timestamp: iso(2400) },
-    { id: "ae-11", caseId: "c-1", actor: "R. Okafor", action: "Status changed", resourceType: "case", resourceId: "c-1", details: "open -> in_review", timestamp: iso(2400) },
-    { id: "ae-12", caseId: "c-1", actor: "R. Okafor", action: "Document uploaded", resourceType: "document", resourceId: "d-1", details: "evidence_package.pdf (2.4 MB)", timestamp: iso(1200) },
-    { id: "ae-13", caseId: "c-2", actor: "M. Silva", action: "Case created", resourceType: "case", resourceId: "c-2", details: "Case opened with priority HIGH", timestamp: iso(2880) },
-    { id: "ae-14", caseId: "c-2", actor: "M. Silva", action: "Task completed", resourceType: "task", resourceId: "n-1", details: "Log incident details", timestamp: iso(2800) },
-    { id: "ae-15", caseId: "c-2", actor: "M. Silva", action: "Stage advanced", resourceType: "stage", resourceId: "st-2", details: "Moved to: Assigned to Investigator", timestamp: iso(2500) },
-    { id: "ae-16", caseId: "c-2", actor: "M. Silva", action: "Comment added", resourceType: "comment", resourceId: "cm-4", details: "IP addresses trace to botnet range", timestamp: iso(2400) },
-    { id: "ae-17", caseId: "c-3", actor: "A. Kul", action: "Case created", resourceType: "case", resourceId: "c-3", details: "Case opened with priority MEDIUM", timestamp: iso(1440) },
-    { id: "ae-18", caseId: "c-3", actor: "A. Kul", action: "Task completed", resourceType: "task", resourceId: "n-d1", details: "Capture transaction reference", timestamp: iso(1300) },
-    { id: "ae-19", caseId: "c-3", actor: "A. Kul", action: "Status changed", resourceType: "case", resourceId: "c-3", details: "open -> blocked", timestamp: iso(600) },
-    { id: "ae-20", caseId: "c-5", actor: "M. Silva", action: "Case created", resourceType: "case", resourceId: "c-5", details: "Case opened with priority HIGH", timestamp: iso(180) },
-    { id: "ae-21", caseId: "c-6", actor: "R. Okafor", action: "Case resolved", resourceType: "case", resourceId: "c-6", details: "All stages completed. Audit trail sealed.", timestamp: iso(8000) },
-    { id: "ae-22", caseId: "c-4", actor: "D. Patel", action: "Case created", resourceType: "case", resourceId: "c-4", details: "Case opened with priority MEDIUM", timestamp: iso(720) },
-    { id: "ae-23", caseId: "c-4", actor: "D. Patel", action: "Task completed", resourceType: "task", resourceId: "n-a1", details: "Define audit scope", timestamp: iso(600) },
+    {
+      id: "ae-1",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Case created",
+      resourceType: "case",
+      resourceId: "c-1",
+      details: "Case opened with priority HIGH",
+      timestamp: iso(4320),
+    },
+    {
+      id: "ae-2",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-1",
+      details: "Log incident details",
+      timestamp: iso(4200),
+    },
+    {
+      id: "ae-3",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-2",
+      details: "Tag severity level",
+      timestamp: iso(4150),
+    },
+    {
+      id: "ae-4",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Stage advanced",
+      resourceType: "stage",
+      resourceId: "st-2",
+      details: "Moved to: Assigned to Investigator",
+      timestamp: iso(4000),
+    },
+    {
+      id: "ae-5",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-3",
+      details: "Select lead investigator",
+      timestamp: iso(3800),
+    },
+    {
+      id: "ae-6",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Stage advanced",
+      resourceType: "stage",
+      resourceId: "st-3",
+      details: "Moved to: Investigation",
+      timestamp: iso(3500),
+    },
+    {
+      id: "ae-7",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-5",
+      details: "Collect evidence logs",
+      timestamp: iso(3000),
+    },
+    {
+      id: "ae-8",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Comment added",
+      resourceType: "comment",
+      resourceId: "cm-1",
+      details: "Finance confirmed the invoice discrepancy",
+      timestamp: iso(3000),
+    },
+    {
+      id: "ae-9",
+      caseId: "c-1",
+      actor: "J. Reyes",
+      action: "Comment added",
+      resourceType: "comment",
+      resourceId: "cm-2",
+      details: "Escalate to vendor relationship team",
+      timestamp: iso(2880),
+    },
+    {
+      id: "ae-10",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Approval requested",
+      resourceType: "approval",
+      resourceId: "ap-1",
+      details: "Lead sign-off requested from J. Reyes",
+      timestamp: iso(2400),
+    },
+    {
+      id: "ae-11",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Status changed",
+      resourceType: "case",
+      resourceId: "c-1",
+      details: "open -> in_review",
+      timestamp: iso(2400),
+    },
+    {
+      id: "ae-12",
+      caseId: "c-1",
+      actor: "R. Okafor",
+      action: "Document uploaded",
+      resourceType: "document",
+      resourceId: "d-1",
+      details: "evidence_package.pdf (2.4 MB)",
+      timestamp: iso(1200),
+    },
+    {
+      id: "ae-13",
+      caseId: "c-2",
+      actor: "M. Silva",
+      action: "Case created",
+      resourceType: "case",
+      resourceId: "c-2",
+      details: "Case opened with priority HIGH",
+      timestamp: iso(2880),
+    },
+    {
+      id: "ae-14",
+      caseId: "c-2",
+      actor: "M. Silva",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-1",
+      details: "Log incident details",
+      timestamp: iso(2800),
+    },
+    {
+      id: "ae-15",
+      caseId: "c-2",
+      actor: "M. Silva",
+      action: "Stage advanced",
+      resourceType: "stage",
+      resourceId: "st-2",
+      details: "Moved to: Assigned to Investigator",
+      timestamp: iso(2500),
+    },
+    {
+      id: "ae-16",
+      caseId: "c-2",
+      actor: "M. Silva",
+      action: "Comment added",
+      resourceType: "comment",
+      resourceId: "cm-4",
+      details: "IP addresses trace to botnet range",
+      timestamp: iso(2400),
+    },
+    {
+      id: "ae-17",
+      caseId: "c-3",
+      actor: "A. Kul",
+      action: "Case created",
+      resourceType: "case",
+      resourceId: "c-3",
+      details: "Case opened with priority MEDIUM",
+      timestamp: iso(1440),
+    },
+    {
+      id: "ae-18",
+      caseId: "c-3",
+      actor: "A. Kul",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-d1",
+      details: "Capture transaction reference",
+      timestamp: iso(1300),
+    },
+    {
+      id: "ae-19",
+      caseId: "c-3",
+      actor: "A. Kul",
+      action: "Status changed",
+      resourceType: "case",
+      resourceId: "c-3",
+      details: "open -> blocked",
+      timestamp: iso(600),
+    },
+    {
+      id: "ae-20",
+      caseId: "c-5",
+      actor: "M. Silva",
+      action: "Case created",
+      resourceType: "case",
+      resourceId: "c-5",
+      details: "Case opened with priority HIGH",
+      timestamp: iso(180),
+    },
+    {
+      id: "ae-21",
+      caseId: "c-6",
+      actor: "R. Okafor",
+      action: "Case resolved",
+      resourceType: "case",
+      resourceId: "c-6",
+      details: "All stages completed. Audit trail sealed.",
+      timestamp: iso(8000),
+    },
+    {
+      id: "ae-22",
+      caseId: "c-4",
+      actor: "D. Patel",
+      action: "Case created",
+      resourceType: "case",
+      resourceId: "c-4",
+      details: "Case opened with priority MEDIUM",
+      timestamp: iso(720),
+    },
+    {
+      id: "ae-23",
+      caseId: "c-4",
+      actor: "D. Patel",
+      action: "Task completed",
+      resourceType: "task",
+      resourceId: "n-a1",
+      details: "Define audit scope",
+      timestamp: iso(600),
+    },
   ];
 
   const documents: DocumentRecord[] = [
-    { id: "d-1", caseId: "c-1", filename: "evidence_package.pdf", mimeType: "application/pdf", sizeBytes: 2412544, uploadedBy: "R. Okafor", createdAt: iso(1200), scanStatus: "clean" },
-    { id: "d-2", caseId: "c-1", filename: "invoice_4421_discrepancy.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", sizeBytes: 184320, uploadedBy: "R. Okafor", createdAt: iso(1100), scanStatus: "clean" },
-    { id: "d-3", caseId: "c-2", filename: "access_logs_eu_west.csv", mimeType: "text/csv", sizeBytes: 5120000, uploadedBy: "M. Silva", createdAt: iso(2400), scanStatus: "clean" },
-    { id: "d-4", caseId: "c-2", filename: "incident_report_draft.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", sizeBytes: 45056, uploadedBy: "M. Silva", createdAt: iso(200), scanStatus: "pending" },
-    { id: "d-5", caseId: "c-3", filename: "transaction_88231_receipt.pdf", mimeType: "application/pdf", sizeBytes: 88064, uploadedBy: "A. Kul", createdAt: iso(1300), scanStatus: "clean" },
-    { id: "d-6", caseId: "c-4", filename: "audit_scope_q3.pdf", mimeType: "application/pdf", sizeBytes: 312448, uploadedBy: "D. Patel", createdAt: iso(600), scanStatus: "clean" },
+    {
+      id: "d-1",
+      caseId: "c-1",
+      filename: "evidence_package.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 2412544,
+      uploadedBy: "R. Okafor",
+      createdAt: iso(1200),
+      scanStatus: "clean",
+    },
+    {
+      id: "d-2",
+      caseId: "c-1",
+      filename: "invoice_4421_discrepancy.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      sizeBytes: 184320,
+      uploadedBy: "R. Okafor",
+      createdAt: iso(1100),
+      scanStatus: "clean",
+    },
+    {
+      id: "d-3",
+      caseId: "c-2",
+      filename: "access_logs_eu_west.csv",
+      mimeType: "text/csv",
+      sizeBytes: 5120000,
+      uploadedBy: "M. Silva",
+      createdAt: iso(2400),
+      scanStatus: "clean",
+    },
+    {
+      id: "d-4",
+      caseId: "c-2",
+      filename: "incident_report_draft.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      sizeBytes: 45056,
+      uploadedBy: "M. Silva",
+      createdAt: iso(200),
+      scanStatus: "pending",
+    },
+    {
+      id: "d-5",
+      caseId: "c-3",
+      filename: "transaction_88231_receipt.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 88064,
+      uploadedBy: "A. Kul",
+      createdAt: iso(1300),
+      scanStatus: "clean",
+    },
+    {
+      id: "d-6",
+      caseId: "c-4",
+      filename: "audit_scope_q3.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 312448,
+      uploadedBy: "D. Patel",
+      createdAt: iso(600),
+      scanStatus: "clean",
+    },
   ];
 
   const notifications: Notification[] = [
-    { id: "nt-1", type: "approval_requested", title: "Approval needed: Lead sign-off", body: "R. Okafor requested your sign-off on CASE-2041 (Vendor dispute).", relatedResourceId: "c-1", isRead: false, createdAt: iso(2400) },
-    { id: "nt-2", type: "case_assigned", title: "New case assigned", body: "You have been assigned to CASE-2045 (Phishing report — finance department).", relatedResourceId: "c-5", isRead: false, createdAt: iso(180) },
-    { id: "nt-3", type: "mention", title: "You were mentioned", body: "J. Reyes mentioned you in a comment on CASE-2041.", relatedResourceId: "c-1", isRead: false, createdAt: iso(2880) },
-    { id: "nt-4", type: "case_resolved", title: "Case resolved", body: "CASE-2040 (Insider trading allegation — Q2) has been resolved.", relatedResourceId: "c-6", isRead: true, createdAt: iso(8000) },
+    {
+      id: "nt-1",
+      type: "approval_requested",
+      title: "Approval needed: Lead sign-off",
+      body: "R. Okafor requested your sign-off on CASE-2041 (Vendor dispute).",
+      relatedResourceId: "c-1",
+      isRead: false,
+      createdAt: iso(2400),
+    },
+    {
+      id: "nt-2",
+      type: "case_assigned",
+      title: "New case assigned",
+      body: "You have been assigned to CASE-2045 (Phishing report — finance department).",
+      relatedResourceId: "c-5",
+      isRead: false,
+      createdAt: iso(180),
+    },
+    {
+      id: "nt-3",
+      type: "mention",
+      title: "You were mentioned",
+      body: "J. Reyes mentioned you in a comment on CASE-2041.",
+      relatedResourceId: "c-1",
+      isRead: false,
+      createdAt: iso(2880),
+    },
+    {
+      id: "nt-4",
+      type: "case_resolved",
+      title: "Case resolved",
+      body: "CASE-2040 (Insider trading allegation — Q2) has been resolved.",
+      relatedResourceId: "c-6",
+      isRead: true,
+      createdAt: iso(8000),
+    },
   ];
 
   const approvals: ApprovalRequest[] = [
-    { id: "ap-1", caseId: "c-1", requestedBy: "R. Okafor", approver: "J. Reyes", status: "pending", reason: "Lead investigator sign-off required before manager review.", decisionNotes: null, createdAt: iso(2400), decidedAt: null },
-    { id: "ap-2", caseId: "c-3", requestedBy: "A. Kul", approver: "J. Reyes", status: "pending", reason: "Finance sign-off needed to unblock duplicate charge refund.", decisionNotes: null, createdAt: iso(600), decidedAt: null },
-    { id: "ap-3", caseId: "c-6", requestedBy: "R. Okafor", approver: "J. Reyes", status: "approved", reason: "All evidence reviewed and findings confirmed.", decisionNotes: "Approved — no further action required.", createdAt: iso(9000), decidedAt: iso(8500) },
+    {
+      id: "ap-1",
+      caseId: "c-1",
+      requestedBy: "R. Okafor",
+      approver: "J. Reyes",
+      status: "pending",
+      reason: "Lead investigator sign-off required before manager review.",
+      decisionNotes: null,
+      createdAt: iso(2400),
+      decidedAt: null,
+      expiresAt: iso(-2880),
+    },
+    {
+      id: "ap-2",
+      caseId: "c-3",
+      requestedBy: "A. Kul",
+      approver: "J. Reyes",
+      status: "pending",
+      reason: "Finance sign-off needed to unblock duplicate charge refund.",
+      decisionNotes: null,
+      createdAt: iso(600),
+      decidedAt: null,
+      expiresAt: iso(-4320),
+    },
+    {
+      id: "ap-3",
+      caseId: "c-6",
+      requestedBy: "R. Okafor",
+      approver: "J. Reyes",
+      status: "approved",
+      reason: "All evidence reviewed and findings confirmed.",
+      decisionNotes: "Approved — no further action required.",
+      createdAt: iso(9000),
+      decidedAt: iso(8500),
+      expiresAt: null,
+    },
   ];
 
-  return { workflows: [wf1, wf2, wf3], cases, comments, auditEvents, documents, notifications, users, teams, approvals };
+  const tasks: TaskRecord[] = [
+    {
+      id: "task-1",
+      caseId: "c-1",
+      title: "Collect evidence logs",
+      description: "Export the relevant invoice and communications trail.",
+      status: "in_progress",
+      priority: "high",
+      assignee: "R. Okafor",
+      assigneeTeamId: "t-1",
+      dueDate: iso(-1440),
+      requiredForStage: true,
+      dependsOnTaskId: null,
+      completedAt: null,
+      createdAt: iso(4200),
+    },
+    {
+      id: "task-2",
+      caseId: "c-1",
+      title: "Complete lead review",
+      description: "Record the reviewer findings and sign-off notes.",
+      status: "pending",
+      priority: "high",
+      assignee: "J. Reyes",
+      assigneeTeamId: "t-3",
+      dueDate: iso(-2880),
+      requiredForStage: true,
+      dependsOnTaskId: "task-1",
+      completedAt: null,
+      createdAt: iso(3600),
+    },
+    {
+      id: "task-3",
+      caseId: "c-2",
+      title: "Isolate affected nodes",
+      description: "Apply containment actions to eu-west production nodes.",
+      status: "in_progress",
+      priority: "high",
+      assignee: "M. Silva",
+      assigneeTeamId: "t-2",
+      dueDate: iso(-720),
+      requiredForStage: true,
+      dependsOnTaskId: null,
+      completedAt: null,
+      createdAt: iso(2700),
+    },
+    {
+      id: "task-4",
+      caseId: "c-3",
+      title: "Verify ledger entry",
+      description: "Confirm the disputed transaction against the finance ledger.",
+      status: "pending",
+      priority: "medium",
+      assignee: "A. Kul",
+      assigneeTeamId: "t-3",
+      dueDate: iso(-1800),
+      requiredForStage: true,
+      dependsOnTaskId: null,
+      completedAt: null,
+      createdAt: iso(1300),
+    },
+    {
+      id: "task-5",
+      caseId: "c-4",
+      title: "Define audit scope",
+      description: "Finalize vendor onboarding controls included in this audit.",
+      status: "completed",
+      priority: "medium",
+      assignee: "D. Patel",
+      assigneeTeamId: "t-2",
+      dueDate: iso(-180),
+      requiredForStage: true,
+      dependsOnTaskId: null,
+      completedAt: iso(600),
+      createdAt: iso(720),
+    },
+  ];
+
+  const permissions: Permission[] = [
+    { id: "perm-case-read", code: "CASE_READ", description: "View cases and case lists." },
+    { id: "perm-case-create", code: "CASE_CREATE", description: "Create cases." },
+    { id: "perm-case-update", code: "CASE_UPDATE", description: "Update case fields." },
+    { id: "perm-case-approve", code: "CASE_APPROVE", description: "Approve or reject cases." },
+    { id: "perm-task", code: "TASK_MANAGE", description: "Create and manage tasks." },
+    { id: "perm-doc-upload", code: "DOCUMENT_UPLOAD", description: "Upload case documents." },
+    { id: "perm-user", code: "USER_MANAGE", description: "Create and manage users." },
+    { id: "perm-team", code: "TEAM_MANAGE", description: "Create and manage teams." },
+    { id: "perm-role", code: "ROLE_MANAGE", description: "Manage roles and assignments." },
+    { id: "perm-audit", code: "AUDIT_READ", description: "Read immutable audit records." },
+  ];
+
+  const roles: RoleRecord[] = [
+    {
+      id: "role-org-admin",
+      name: "ORG_ADMIN",
+      description: "Full tenant control.",
+      isSystemRole: true,
+      permissionIds: permissions.map((permission) => permission.id),
+    },
+    {
+      id: "role-case-manager",
+      name: "CASE_MANAGER",
+      description: "Manages case, task, document and approval work.",
+      isSystemRole: true,
+      permissionIds: [
+        "perm-case-read",
+        "perm-case-create",
+        "perm-case-update",
+        "perm-case-approve",
+        "perm-task",
+        "perm-doc-upload",
+        "perm-audit",
+      ],
+    },
+    {
+      id: "role-investigator",
+      name: "INVESTIGATOR",
+      description: "Tenant investigator role for operational case work.",
+      isSystemRole: false,
+      permissionIds: ["perm-case-read", "perm-case-update", "perm-task", "perm-doc-upload"],
+    },
+  ];
+
+  const userRoleAssignments: UserRoleAssignment[] = [
+    { userId: "u-1", roleId: "role-org-admin", assignedAt: iso(525600) },
+    { userId: "u-2", roleId: "role-investigator", assignedAt: iso(350000) },
+    { userId: "u-3", roleId: "role-case-manager", assignedAt: iso(300000) },
+    { userId: "u-4", roleId: "role-case-manager", assignedAt: iso(280000) },
+  ];
+
+  const serviceStatuses: ServiceStatus[] = [
+    {
+      name: "Authentication",
+      status: "operational",
+      detail: "JWKS and Redis session layer available",
+    },
+    { name: "Organization", status: "operational", detail: "Tenant data available" },
+    { name: "User & Team", status: "operational", detail: "Profiles and memberships available" },
+    { name: "RBAC", status: "degraded", detail: "Permission cache active" },
+    { name: "Document", status: "operational", detail: "Upload and version relay available" },
+    { name: "Audit", status: "degraded", detail: "Audit retrieval authorization pending" },
+  ];
+
+  return {
+    organizations,
+    selectedOrganizationId: organizations[0]?.id ?? "",
+    workflows: [wf1, wf2, wf3],
+    cases,
+    comments,
+    auditEvents,
+    documents,
+    notifications,
+    users,
+    teams,
+    approvals,
+    tasks,
+    permissions,
+    roles,
+    userRoleAssignments,
+    serviceStatuses,
+    toast: null,
+    busyAction: null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,28 +1131,85 @@ function seed(): StoreShape {
 
 interface StoreApi extends StoreShape {
   ready: boolean;
+  resetDemo: () => void;
+  selectOrganization: (id: string) => void;
+  updateOrganizationStatus: (id: string, status: Organization["status"]) => void;
+  notify: (title: string, description?: string, tone?: PrototypeToast["tone"]) => void;
+  clearToast: () => void;
+  simulateAction: <T>(operation: () => T, title: string, description?: string) => Promise<T>;
   createWorkflow: (input: Pick<Workflow, "name" | "description" | "status">) => Workflow;
   updateWorkflow: (id: string, patch: Partial<Workflow>) => void;
   deleteWorkflow: (id: string) => void;
-  createCase: (input: Pick<CaseRecord, "title" | "summary" | "workflowId" | "priority" | "owner">) => CaseRecord;
+  createCase: (
+    input: Pick<CaseRecord, "title" | "summary" | "workflowId" | "priority" | "owner">,
+  ) => CaseRecord;
   updateCase: (id: string, patch: Partial<CaseRecord>) => void;
   deleteCase: (id: string) => void;
   toggleNode: (caseId: string, nodeId: string) => void;
   addComment: (caseId: string, author: string, body: string, parentId?: string | null) => void;
-  addAuditEvent: (caseId: string, actor: string, action: string, resourceType: AuditEvent["resourceType"], details: string) => void;
-  addDocument: (caseId: string, filename: string, mimeType: string, sizeBytes: number, uploadedBy: string) => void;
+  addAuditEvent: (
+    caseId: string,
+    actor: string,
+    action: string,
+    resourceType: AuditEvent["resourceType"],
+    details: string,
+  ) => void;
+  addDocument: (
+    caseId: string,
+    filename: string,
+    mimeType: string,
+    sizeBytes: number,
+    uploadedBy: string,
+  ) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   approveRequest: (id: string, notes: string) => void;
   rejectRequest: (id: string, notes: string) => void;
+  createTask: (input: Omit<TaskRecord, "id" | "createdAt" | "completedAt">) => TaskRecord;
+  updateTask: (id: string, patch: Partial<TaskRecord>) => void;
+  deleteTask: (id: string) => void;
+  completeTask: (id: string) => void;
+  createRole: (input: Omit<RoleRecord, "id" | "isSystemRole">) => RoleRecord;
+  updateRole: (id: string, patch: Partial<RoleRecord>) => void;
+  deleteRole: (id: string) => void;
+  assignRole: (userId: string, roleId: string) => void;
+  revokeRole: (userId: string, roleId: string) => void;
+  updateUserStatus: (id: string, status: User["status"]) => void;
+  createUser: (input: Pick<User, "name" | "email" | "role" | "status" | "teamId">) => User;
+  createOrganization: (input: Pick<Organization, "name" | "slug">) => Organization;
+  createTeam: (name: string, description: string) => Team;
+  updateTeam: (id: string, patch: Partial<Team>) => void;
+  deleteTeam: (id: string) => void;
+  addTeamMember: (teamId: string, userId: string) => void;
+  removeTeamMember: (teamId: string, userId: string) => void;
+  recordAuditEvent: (input: Omit<AuditEvent, "id" | "timestamp">) => AuditEvent;
+  uploadDocument: (
+    input: Omit<DocumentRecord, "id" | "createdAt" | "scanStatus">,
+  ) => DocumentRecord;
 }
 
 const Ctx = createContext<StoreApi | null>(null);
 
 export function ResolveProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoreShape>({
-    workflows: [], cases: [], comments: [], auditEvents: [], documents: [],
-    notifications: [], users: [], teams: [], approvals: [],
+    organizations: [],
+    selectedOrganizationId: "",
+    workflows: [],
+    cases: [],
+    comments: [],
+    auditEvents: [],
+    documents: [],
+    notifications: [],
+    users: [],
+    teams: [],
+    approvals: [],
+    tasks: [],
+    permissions: [],
+    roles: [],
+    userRoleAssignments: [],
+    serviceStatuses: [],
+    toast: null,
+    busyAction: null,
   });
   const [ready, setReady] = useState(false);
 
@@ -359,6 +1219,11 @@ export function ResolveProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<StoreShape>;
         setState({
+          organizations: parsed.organizations ?? seed().organizations,
+          selectedOrganizationId:
+            parsed.selectedOrganizationId ??
+            parsed.organizations?.[0]?.id ??
+            seed().selectedOrganizationId,
           workflows: parsed.workflows ?? [],
           cases: parsed.cases ?? [],
           comments: parsed.comments ?? [],
@@ -368,6 +1233,13 @@ export function ResolveProvider({ children }: { children: ReactNode }) {
           users: parsed.users ?? [],
           teams: parsed.teams ?? [],
           approvals: parsed.approvals ?? [],
+          tasks: parsed.tasks ?? seed().tasks,
+          permissions: parsed.permissions ?? seed().permissions,
+          roles: parsed.roles ?? seed().roles,
+          userRoleAssignments: parsed.userRoleAssignments ?? seed().userRoleAssignments,
+          serviceStatuses: parsed.serviceStatuses ?? seed().serviceStatuses,
+          toast: null,
+          busyAction: null,
         });
       } else {
         setState(seed());
@@ -383,14 +1255,93 @@ export function ResolveProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(KEY, JSON.stringify(state));
   }, [state, ready]);
 
+  const resetDemo = useCallback(() => {
+    setState(seed());
+  }, []);
+
+  const selectOrganization = useCallback((id: string) => {
+    setState((s) => ({ ...s, selectedOrganizationId: id, toast: null }));
+  }, []);
+
+  const updateOrganizationStatus = useCallback((id: string, status: Organization["status"]) => {
+    setState((s) => {
+      const organization = s.organizations.find((item) => item.id === id);
+      return {
+        ...s,
+        organizations: s.organizations.map((item) => (item.id === id ? { ...item, status } : item)),
+        auditEvents: [
+          {
+            id: uid(),
+            caseId: "",
+            actor: "R. Okafor",
+            action: status === "ACTIVE" ? "Organization reactivated" : "Organization suspended",
+            resourceType: "organization",
+            resourceId: id,
+            details: `${organization?.name ?? "Organization"} status changed to ${status}.`,
+            timestamp: new Date().toISOString(),
+          },
+          ...s.auditEvents,
+        ],
+      };
+    });
+  }, []);
+
+  const notify = useCallback(
+    (title: string, description?: string, tone: PrototypeToast["tone"] = "success") => {
+      setState((s) => ({
+        ...s,
+        toast: { id: uid(), title, description: description ?? "", tone },
+      }));
+    },
+    [],
+  );
+
+  const clearToast = useCallback(() => {
+    setState((s) => ({ ...s, toast: null }));
+  }, []);
+
+  const simulateAction = useCallback(
+    async <T,>(operation: () => T, title: string, description?: string) => {
+      setState((s) => ({ ...s, busyAction: title }));
+      await new Promise((resolve) => window.setTimeout(resolve, 550));
+      const result = operation();
+      setState((s) => ({
+        ...s,
+        busyAction: null,
+        toast: { id: uid(), title, description: description ?? "", tone: "success" },
+      }));
+      return result;
+    },
+    [],
+  );
+
   const createWorkflow: StoreApi["createWorkflow"] = useCallback((input) => {
     const wf: Workflow = { id: uid(), ...input, stages: [], createdAt: new Date().toISOString() };
-    setState((s) => ({ ...s, workflows: [wf, ...s.workflows] }));
+    setState((s) => ({
+      ...s,
+      workflows: [wf, ...s.workflows],
+      auditEvents: [
+        {
+          id: uid(),
+          caseId: "",
+          actor: "R. Okafor",
+          action: "Workflow created",
+          resourceType: "stage",
+          resourceId: wf.id,
+          details: `${wf.name} was created.`,
+          timestamp: new Date().toISOString(),
+        },
+        ...s.auditEvents,
+      ],
+    }));
     return wf;
   }, []);
 
   const updateWorkflow: StoreApi["updateWorkflow"] = useCallback((id, patch) => {
-    setState((s) => ({ ...s, workflows: s.workflows.map((w) => (w.id === id ? { ...w, ...patch } : w)) }));
+    setState((s) => ({
+      ...s,
+      workflows: s.workflows.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+    }));
   }, []);
 
   const deleteWorkflow: StoreApi["deleteWorkflow"] = useCallback((id) => {
@@ -403,16 +1354,68 @@ export function ResolveProvider({ children }: { children: ReactNode }) {
 
   const createCase: StoreApi["createCase"] = useCallback((input) => {
     const rec: CaseRecord = {
-      id: uid(), ref: `CASE-${Math.floor(2046 + Math.random() * 8000)}`,
-      stageIndex: 0, status: "open", completed: [], createdAt: new Date().toISOString(),
+      id: uid(),
+      ref: `CASE-${Date.now().toString().slice(-6)}`,
+      stageIndex: 0,
+      status: "open",
+      completed: [],
+      createdAt: new Date().toISOString(),
       ...input,
     };
-    setState((s) => ({ ...s, cases: [rec, ...s.cases] }));
+    setState((s) => ({
+      ...s,
+      cases: [rec, ...s.cases],
+      auditEvents: [
+        {
+          id: uid(),
+          caseId: rec.id,
+          actor: "R. Okafor",
+          action: "Case created",
+          resourceType: "case",
+          resourceId: rec.id,
+          details: `${rec.ref} · ${rec.title}`,
+          timestamp: new Date().toISOString(),
+        },
+        ...s.auditEvents,
+      ],
+    }));
     return rec;
   }, []);
 
   const updateCase: StoreApi["updateCase"] = useCallback((id, patch) => {
-    setState((s) => ({ ...s, cases: s.cases.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+    setState((s) => {
+      const current = s.cases.find((item) => item.id === id);
+      if (!current) return s;
+      const action =
+        patch.status && patch.status !== current.status
+          ? "Case status changed"
+          : patch.owner && patch.owner !== current.owner
+            ? "Case reassigned"
+            : "Case updated";
+      const details =
+        patch.status && patch.status !== current.status
+          ? `${current.status} → ${patch.status}`
+          : patch.owner && patch.owner !== current.owner
+            ? `Owner changed to ${patch.owner}`
+            : "Case fields were updated";
+      return {
+        ...s,
+        cases: s.cases.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+        auditEvents: [
+          {
+            id: uid(),
+            caseId: id,
+            actor: "R. Okafor",
+            action,
+            resourceType: "case",
+            resourceId: id,
+            details,
+            timestamp: new Date().toISOString(),
+          },
+          ...s.auditEvents,
+        ],
+      };
+    });
   }, []);
 
   const deleteCase: StoreApi["deleteCase"] = useCallback((id) => {
@@ -424,59 +1427,419 @@ export function ResolveProvider({ children }: { children: ReactNode }) {
       ...s,
       cases: s.cases.map((c) =>
         c.id === caseId
-          ? { ...c, completed: c.completed.includes(nodeId) ? c.completed.filter((n) => n !== nodeId) : [...c.completed, nodeId] }
+          ? {
+              ...c,
+              completed: c.completed.includes(nodeId)
+                ? c.completed.filter((n) => n !== nodeId)
+                : [...c.completed, nodeId],
+            }
           : c,
       ),
     }));
   }, []);
 
-  const addComment: StoreApi["addComment"] = useCallback((caseId, author, body, parentId = null) => {
-    const c: Comment = { id: uid(), caseId, author, body, parentId, createdAt: new Date().toISOString(), isEdited: false };
-    setState((s) => ({ ...s, comments: [...s.comments, c] }));
-  }, []);
+  const addComment: StoreApi["addComment"] = useCallback(
+    (caseId, author, body, parentId = null) => {
+      const c: Comment = {
+        id: uid(),
+        caseId,
+        author,
+        body,
+        parentId,
+        createdAt: new Date().toISOString(),
+        isEdited: false,
+      };
+      setState((s) => ({ ...s, comments: [...s.comments, c] }));
+    },
+    [],
+  );
 
-  const addAuditEvent: StoreApi["addAuditEvent"] = useCallback((caseId, actor, action, resourceType, details) => {
-    const ae: AuditEvent = { id: uid(), caseId, actor, action, resourceType, resourceId: caseId, details, timestamp: new Date().toISOString() };
-    setState((s) => ({ ...s, auditEvents: [...s.auditEvents, ae] }));
-  }, []);
+  const addAuditEvent: StoreApi["addAuditEvent"] = useCallback(
+    (caseId, actor, action, resourceType, details) => {
+      const ae: AuditEvent = {
+        id: uid(),
+        caseId,
+        actor,
+        action,
+        resourceType,
+        resourceId: caseId,
+        details,
+        timestamp: new Date().toISOString(),
+      };
+      setState((s) => ({ ...s, auditEvents: [...s.auditEvents, ae] }));
+    },
+    [],
+  );
 
-  const addDocument: StoreApi["addDocument"] = useCallback((caseId, filename, mimeType, sizeBytes, uploadedBy) => {
-    const d: DocumentRecord = { id: uid(), caseId, filename, mimeType, sizeBytes, uploadedBy, createdAt: new Date().toISOString(), scanStatus: "pending" };
-    setState((s) => ({ ...s, documents: [...s.documents, d] }));
-  }, []);
+  const addDocument: StoreApi["addDocument"] = useCallback(
+    (caseId, filename, mimeType, sizeBytes, uploadedBy) => {
+      const d: DocumentRecord = {
+        id: uid(),
+        caseId,
+        filename,
+        mimeType,
+        sizeBytes,
+        uploadedBy,
+        createdAt: new Date().toISOString(),
+        scanStatus: "pending",
+      };
+      setState((s) => ({ ...s, documents: [...s.documents, d] }));
+    },
+    [],
+  );
 
   const markNotificationRead: StoreApi["markNotificationRead"] = useCallback((id) => {
-    setState((s) => ({ ...s, notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)) }));
+    setState((s) => ({
+      ...s,
+      notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+    }));
   }, []);
 
   const markAllNotificationsRead: StoreApi["markAllNotificationsRead"] = useCallback(() => {
-    setState((s) => ({ ...s, notifications: s.notifications.map((n) => ({ ...n, isRead: true })) }));
+    setState((s) => ({
+      ...s,
+      notifications: s.notifications.map((n) => ({ ...n, isRead: true })),
+    }));
   }, []);
 
   const approveRequest: StoreApi["approveRequest"] = useCallback((id, notes) => {
     setState((s) => ({
       ...s,
-      approvals: s.approvals.map((a) => (a.id === id ? { ...a, status: "approved", decisionNotes: notes, decidedAt: new Date().toISOString() } : a)),
+      approvals: s.approvals.map((a) =>
+        a.id === id
+          ? { ...a, status: "approved", decisionNotes: notes, decidedAt: new Date().toISOString() }
+          : a,
+      ),
     }));
   }, []);
 
   const rejectRequest: StoreApi["rejectRequest"] = useCallback((id, notes) => {
     setState((s) => ({
       ...s,
-      approvals: s.approvals.map((a) => (a.id === id ? { ...a, status: "rejected", decisionNotes: notes, decidedAt: new Date().toISOString() } : a)),
+      approvals: s.approvals.map((a) =>
+        a.id === id
+          ? { ...a, status: "rejected", decisionNotes: notes, decidedAt: new Date().toISOString() }
+          : a,
+      ),
+    }));
+  }, []);
+
+  const createTask: StoreApi["createTask"] = useCallback((input) => {
+    const task: TaskRecord = {
+      id: uid(),
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      ...input,
+    };
+    setState((s) => ({ ...s, tasks: [task, ...s.tasks] }));
+    return task;
+  }, []);
+
+  const updateTask: StoreApi["updateTask"] = useCallback((id, patch) => {
+    setState((s) => ({
+      ...s,
+      tasks: s.tasks.map((task) => (task.id === id ? { ...task, ...patch } : task)),
+    }));
+  }, []);
+
+  const deleteTask: StoreApi["deleteTask"] = useCallback((id) => {
+    setState((s) => ({ ...s, tasks: s.tasks.filter((task) => task.id !== id) }));
+  }, []);
+
+  const completeTask: StoreApi["completeTask"] = useCallback((id) => {
+    setState((s) => ({
+      ...s,
+      tasks: s.tasks.map((task) =>
+        task.id === id
+          ? { ...task, status: "completed", completedAt: new Date().toISOString() }
+          : task,
+      ),
+    }));
+  }, []);
+
+  const createRole: StoreApi["createRole"] = useCallback((input) => {
+    const role: RoleRecord = { id: uid(), isSystemRole: false, ...input };
+    setState((s) => ({ ...s, roles: [role, ...s.roles] }));
+    return role;
+  }, []);
+
+  const updateRole: StoreApi["updateRole"] = useCallback((id, patch) => {
+    setState((s) => ({
+      ...s,
+      roles: s.roles.map((role) =>
+        role.id === id && !role.isSystemRole ? { ...role, ...patch } : role,
+      ),
+    }));
+  }, []);
+
+  const deleteRole: StoreApi["deleteRole"] = useCallback((id) => {
+    setState((s) => ({
+      ...s,
+      roles: s.roles.filter((role) => role.id !== id || role.isSystemRole),
+      userRoleAssignments: s.userRoleAssignments.filter((assignment) => assignment.roleId !== id),
+    }));
+  }, []);
+
+  const assignRole: StoreApi["assignRole"] = useCallback((userId, roleId) => {
+    setState((s) => {
+      if (
+        s.userRoleAssignments.some(
+          (assignment) => assignment.userId === userId && assignment.roleId === roleId,
+        )
+      )
+        return s;
+      const role = s.roles.find((item) => item.id === roleId);
+      const user = s.users.find((item) => item.id === userId);
+      return {
+        ...s,
+        userRoleAssignments: [
+          ...s.userRoleAssignments,
+          { userId, roleId, assignedAt: new Date().toISOString() },
+        ],
+        auditEvents: [
+          {
+            id: uid(),
+            caseId: "",
+            actor: "R. Okafor",
+            action: "Role assigned",
+            resourceType: "role",
+            resourceId: roleId,
+            details: `${role?.name ?? "Role"} assigned to ${user?.name ?? "user"}.`,
+            timestamp: new Date().toISOString(),
+          },
+          ...s.auditEvents,
+        ],
+      };
+    });
+  }, []);
+
+  const revokeRole: StoreApi["revokeRole"] = useCallback((userId, roleId) => {
+    setState((s) => ({
+      ...s,
+      userRoleAssignments: s.userRoleAssignments.filter(
+        (assignment) => !(assignment.userId === userId && assignment.roleId === roleId),
+      ),
+    }));
+  }, []);
+
+  const updateUserStatus: StoreApi["updateUserStatus"] = useCallback((id, status) => {
+    setState((s) => ({
+      ...s,
+      users: s.users.map((user) => (user.id === id ? { ...user, status } : user)),
+    }));
+  }, []);
+
+  const createUser: StoreApi["createUser"] = useCallback((input) => {
+    const user: User = { id: uid(), ...input };
+    setState((s) => ({
+      ...s,
+      users: [user, ...s.users],
+      auditEvents: [
+        {
+          id: uid(),
+          caseId: "",
+          actor: "R. Okafor",
+          action: "User provisioned",
+          resourceType: "user",
+          resourceId: user.id,
+          details: `${user.name} was created and set to ${user.status}.`,
+          timestamp: new Date().toISOString(),
+        },
+        ...s.auditEvents,
+      ],
+    }));
+    return user;
+  }, []);
+
+  const createOrganization: StoreApi["createOrganization"] = useCallback((input) => {
+    const organization: Organization = {
+      id: uid(),
+      ...input,
+      status: "ACTIVE",
+      createdAt: new Date().toISOString(),
+    };
+    setState((s) => ({
+      ...s,
+      organizations: [organization, ...s.organizations],
+      selectedOrganizationId: organization.id,
+      auditEvents: [
+        {
+          id: uid(),
+          caseId: "",
+          actor: "R. Okafor",
+          action: "Organization created",
+          resourceType: "organization",
+          resourceId: organization.id,
+          details: `${organization.name} (${organization.slug}) was provisioned.`,
+          timestamp: new Date().toISOString(),
+        },
+        ...s.auditEvents,
+      ],
+    }));
+    return organization;
+  }, []);
+
+  const recordAuditEvent: StoreApi["recordAuditEvent"] = useCallback((input) => {
+    const event: AuditEvent = { id: uid(), timestamp: new Date().toISOString(), ...input };
+    setState((s) => ({ ...s, auditEvents: [event, ...s.auditEvents] }));
+    return event;
+  }, []);
+
+  const uploadDocument: StoreApi["uploadDocument"] = useCallback((input) => {
+    const document: DocumentRecord = {
+      id: uid(),
+      createdAt: new Date().toISOString(),
+      scanStatus: "pending",
+      ...input,
+    };
+    setState((s) => ({ ...s, documents: [document, ...s.documents] }));
+    return document;
+  }, []);
+
+  const createTeam: StoreApi["createTeam"] = useCallback((name, description) => {
+    const team: Team = { id: uid(), name, description };
+    setState((s) => ({ ...s, teams: [team, ...s.teams] }));
+    return team;
+  }, []);
+
+  const updateTeam: StoreApi["updateTeam"] = useCallback((id, patch) => {
+    setState((s) => ({
+      ...s,
+      teams: s.teams.map((team) => (team.id === id ? { ...team, ...patch } : team)),
+    }));
+  }, []);
+
+  const deleteTeam: StoreApi["deleteTeam"] = useCallback((id) => {
+    setState((s) => ({
+      ...s,
+      teams: s.teams.filter((team) => team.id !== id),
+      users: s.users.map((user) => (user.teamId === id ? { ...user, teamId: null } : user)),
+      tasks: s.tasks.map((task) =>
+        task.assigneeTeamId === id ? { ...task, assigneeTeamId: null } : task,
+      ),
+    }));
+  }, []);
+
+  const addTeamMember: StoreApi["addTeamMember"] = useCallback((teamId, userId) => {
+    setState((s) => {
+      const team = s.teams.find((item) => item.id === teamId);
+      const user = s.users.find((item) => item.id === userId);
+      return {
+        ...s,
+        users: s.users.map((item) => (item.id === userId ? { ...item, teamId } : item)),
+        auditEvents: [
+          {
+            id: uid(),
+            caseId: "",
+            actor: "R. Okafor",
+            action: "Team membership changed",
+            resourceType: "team",
+            resourceId: teamId,
+            details: `${user?.name ?? "User"} added to ${team?.name ?? "team"}.`,
+            timestamp: new Date().toISOString(),
+          },
+          ...s.auditEvents,
+        ],
+      };
+    });
+  }, []);
+
+  const removeTeamMember: StoreApi["removeTeamMember"] = useCallback((teamId, userId) => {
+    setState((s) => ({
+      ...s,
+      users: s.users.map((user) =>
+        user.id === userId && user.teamId === teamId ? { ...user, teamId: null } : user,
+      ),
     }));
   }, []);
 
   const value = useMemo<StoreApi>(
     () => ({
-      ...state, ready,
-      createWorkflow, updateWorkflow, deleteWorkflow,
-      createCase, updateCase, deleteCase, toggleNode,
-      addComment, addAuditEvent, addDocument,
-      markNotificationRead, markAllNotificationsRead,
-      approveRequest, rejectRequest,
+      ...state,
+      ready,
+      resetDemo,
+      selectOrganization,
+      updateOrganizationStatus,
+      notify,
+      clearToast,
+      simulateAction,
+      createWorkflow,
+      updateWorkflow,
+      deleteWorkflow,
+      createCase,
+      updateCase,
+      deleteCase,
+      toggleNode,
+      addComment,
+      addAuditEvent,
+      addDocument,
+      markNotificationRead,
+      markAllNotificationsRead,
+      approveRequest,
+      rejectRequest,
+      createTask,
+      updateTask,
+      deleteTask,
+      completeTask,
+      createRole,
+      updateRole,
+      deleteRole,
+      assignRole,
+      revokeRole,
+      updateUserStatus,
+      createUser,
+      createOrganization,
+      recordAuditEvent,
+      uploadDocument,
+      createTeam,
+      updateTeam,
+      deleteTeam,
+      addTeamMember,
+      removeTeamMember,
     }),
-    [state, ready, createWorkflow, updateWorkflow, deleteWorkflow, createCase, updateCase, deleteCase, toggleNode, addComment, addAuditEvent, addDocument, markNotificationRead, markAllNotificationsRead, approveRequest, rejectRequest],
+    [
+      state,
+      ready,
+      resetDemo,
+      selectOrganization,
+      updateOrganizationStatus,
+      notify,
+      clearToast,
+      simulateAction,
+      createWorkflow,
+      updateWorkflow,
+      deleteWorkflow,
+      createCase,
+      updateCase,
+      deleteCase,
+      toggleNode,
+      addComment,
+      addAuditEvent,
+      addDocument,
+      markNotificationRead,
+      markAllNotificationsRead,
+      approveRequest,
+      rejectRequest,
+      createTask,
+      updateTask,
+      deleteTask,
+      completeTask,
+      createRole,
+      updateRole,
+      deleteRole,
+      assignRole,
+      revokeRole,
+      updateUserStatus,
+      createUser,
+      createOrganization,
+      recordAuditEvent,
+      uploadDocument,
+      createTeam,
+      updateTeam,
+      deleteTeam,
+      addTeamMember,
+      removeTeamMember,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -499,7 +1862,12 @@ export function countNodes(wf: Workflow | undefined) {
   if (!wf) return { tasks: 0, gates: 0 };
   let tasks = 0;
   let gates = 0;
-  for (const st of wf.stages) for (const n of st.nodes) n.kind === "approval" ? gates++ : tasks++;
+  for (const st of wf.stages) {
+    for (const n of st.nodes) {
+      if (n.kind === "approval") gates++;
+      else tasks++;
+    }
+  }
   return { tasks, gates };
 }
 

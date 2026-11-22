@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Crumb, Shell } from "@/components/Shell";
 import {
   DangerButton,
@@ -196,9 +196,7 @@ function CommentsTab({ caseId }: { caseId: string }) {
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">{c.author}</span>
               <span className="text-[10px] font-mono text-muted">{timeAgo(c.createdAt)}</span>
-              {c.isEdited && (
-                <span className="text-[10px] font-mono text-muted">(edited)</span>
-              )}
+              {c.isEdited && <span className="text-[10px] font-mono text-muted">(edited)</span>}
             </div>
             <p className="text-sm text-foreground/80 mt-0.5 whitespace-pre-wrap break-words">
               {c.body}
@@ -331,6 +329,14 @@ function DocumentsTab({ caseId }: { caseId: string }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [filename, setFilename] = useState("");
   const [sizeKb, setSizeKb] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelected = (file: File | undefined) => {
+    if (!file) return;
+    setFilename(file.name);
+    setSizeKb(Math.max(1, Math.ceil(file.size / 1024)).toString());
+    setUploadOpen(true);
+  };
 
   const caseDocs = useMemo(
     () =>
@@ -365,12 +371,18 @@ function DocumentsTab({ caseId }: { caseId: string }) {
         style={{ animationDelay: "120ms" }}
       >
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <p className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted">
-            Documents
-          </p>
-          <GhostButton onClick={() => setUploadOpen(true)} className="text-xs">
-            + Upload
-          </GhostButton>
+          <p className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted">Documents</p>
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => handleFileSelected(event.target.files?.[0])}
+            />
+            <GhostButton onClick={() => fileInputRef.current?.click()} className="text-xs">
+              + Upload
+            </GhostButton>
+          </>
         </div>
         {caseDocs.length === 0 ? (
           <p className="text-sm text-muted text-center py-10">No documents uploaded yet.</p>
@@ -395,9 +407,7 @@ function DocumentsTab({ caseId }: { caseId: string }) {
                     </td>
                     <td className="px-4 py-2.5 text-muted">{d.uploadedBy}</td>
                     <td className="px-4 py-2.5">
-                      <Tag tone={d.scanStatus === "clean" ? "success" : "warn"}>
-                        {d.scanStatus}
-                      </Tag>
+                      <Tag tone={d.scanStatus === "clean" ? "success" : "warn"}>{d.scanStatus}</Tag>
                     </td>
                     <td className="px-4 py-2.5 text-muted font-mono text-xs text-right">
                       {timeAgo(d.createdAt)}
@@ -510,17 +520,11 @@ function ApprovalsTab({ caseId }: { caseId: string }) {
                     <TextArea
                       value={notes[a.id] ?? ""}
                       placeholder="Decision notes (optional)…"
-                      onChange={(e) =>
-                        setNotes((n) => ({ ...n, [a.id]: e.target.value }))
-                      }
+                      onChange={(e) => setNotes((n) => ({ ...n, [a.id]: e.target.value }))}
                     />
                     <div className="flex gap-2">
-                      <PrimaryButton onClick={() => decide(a, "approved")}>
-                        Approve
-                      </PrimaryButton>
-                      <DangerButton onClick={() => decide(a, "rejected")}>
-                        Reject
-                      </DangerButton>
+                      <PrimaryButton onClick={() => decide(a, "approved")}>Approve</PrimaryButton>
+                      <DangerButton onClick={() => decide(a, "rejected")}>Reject</DangerButton>
                     </div>
                   </div>
                 ) : (
@@ -561,6 +565,7 @@ function CaseDetail() {
     updateCase,
     deleteCase,
     toggleNode,
+    addAuditEvent,
     ready,
   } = useResolve();
   const navigate = useNavigate();
@@ -569,6 +574,8 @@ function CaseDetail() {
 
   const [editModal, setEditModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [stageAdvance, setStageAdvance] = useState<{ targetIndex: number } | null>(null);
+  const [stageConviction, setStageConviction] = useState("");
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
 
   const [form, setForm] = useState({
@@ -617,9 +624,35 @@ function CaseDetail() {
   const advanceStage = (dir: 1 | -1) => {
     if (!workflow) return;
     const newIdx = caseRecord.stageIndex + dir;
-    if (newIdx >= 0 && newIdx < workflow.stages.length) {
-      updateCase(caseRecord.id, { stageIndex: newIdx });
+    if (newIdx < 0 || newIdx >= workflow.stages.length) return;
+
+    if (dir === 1) {
+      setStageConviction("");
+      setStageAdvance({ targetIndex: newIdx });
+      return;
     }
+
+    updateCase(caseRecord.id, { stageIndex: newIdx });
+  };
+
+  const confirmStageAdvance = () => {
+    if (!workflow || !stageAdvance || !stageConviction.trim()) return;
+    const completedStage = workflow.stages[caseRecord.stageIndex];
+    const targetStage = workflow.stages[stageAdvance.targetIndex];
+
+    updateCase(caseRecord.id, {
+      stageIndex: stageAdvance.targetIndex,
+      stageConviction: stageConviction.trim(),
+    });
+    addAuditEvent(
+      caseRecord.id,
+      "R. Okafor",
+      "Stage approved",
+      "stage",
+      `${completedStage?.name ?? "Stage"} marked complete and moved to ${targetStage?.name ?? "next stage"}. Conviction: ${stageConviction.trim()}`,
+    );
+    setStageAdvance(null);
+    setStageConviction("");
   };
 
   // Counts for tab badges
@@ -698,6 +731,16 @@ function CaseDetail() {
                 </span>
               </div>
             </div>
+            {caseRecord.stageConviction && (
+              <div className="mt-3 max-w-2xl rounded-lg border border-primary/15 bg-primary/5 px-3 py-2">
+                <p className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted">
+                  Latest stage conviction
+                </p>
+                <p className="mt-1 text-sm text-foreground/80 whitespace-pre-wrap">
+                  {caseRecord.stageConviction}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -817,9 +860,7 @@ function CaseDetail() {
                   </div>
                   <div className="px-4 pb-4 pt-2 min-h-[200px]">
                     {workflow.stages[caseRecord.stageIndex]?.nodes.length === 0 ? (
-                      <p className="text-sm text-muted text-center mt-8">
-                        No items in this stage.
-                      </p>
+                      <p className="text-sm text-muted text-center mt-8">No items in this stage.</p>
                     ) : (
                       <ChecklistTree
                         nodes={workflow.stages[caseRecord.stageIndex]?.nodes || []}
@@ -885,6 +926,50 @@ function CaseDetail() {
         <div className="flex justify-end gap-2 pt-1">
           <GhostButton onClick={() => setEditModal(false)}>Cancel</GhostButton>
           <PrimaryButton onClick={saveEdit}>Save</PrimaryButton>
+        </div>
+      </Modal>
+
+      {/* Stage approval modal */}
+      <Modal
+        open={!!stageAdvance}
+        title="Approve stage and move forward"
+        onClose={() => {
+          setStageAdvance(null);
+          setStageConviction("");
+        }}
+      >
+        <Field label="Conviction / completion note">
+          <TextArea
+            value={stageConviction}
+            autoFocus
+            placeholder="Explain why this stage is complete and provide the decision rationale..."
+            onChange={(event) => setStageConviction(event.target.value)}
+          />
+        </Field>
+        {stageAdvance && workflow && (
+          <p className="text-[11px] text-muted">
+            Moving from{" "}
+            <span className="font-medium text-foreground">
+              {workflow.stages[caseRecord.stageIndex]?.name}
+            </span>{" "}
+            to{" "}
+            <span className="font-medium text-foreground">
+              {workflow.stages[stageAdvance.targetIndex]?.name}
+            </span>
+          </p>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <GhostButton
+            onClick={() => {
+              setStageAdvance(null);
+              setStageConviction("");
+            }}
+          >
+            Cancel
+          </GhostButton>
+          <PrimaryButton onClick={confirmStageAdvance} disabled={!stageConviction.trim()}>
+            Approve & move forward
+          </PrimaryButton>
         </div>
       </Modal>
 
