@@ -1,0 +1,113 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --font-sans: var(--font-sans-family);
+  --font-mono: var(--font-mono-family);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--primary);
+  --color-surface: var(--surface);
+  --color-surface-solid: var(--surface-solid);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-card: var(--surface-solid);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-accent: var(--secondary);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--primary-foreground);
+}
+
+:root {
+  --radius: 0.75rem;
+  --font-sans-family: "Inter", system-ui, sans-serif;
+  --font-mono-family: "JetBrains Mono", monospace;
+  --background: hsl(222 30% 97%);
+  --foreground: hsl(224 25% 12%);
+  --muted: hsl(224 12% 45%);
+  --primary: hsl(222 85% 56%);
+  --primary-foreground: hsl(0 0% 100%);
+  --border: hsl(224 20% 12% / 0.09);
+  --surface: hsl(0 0% 100% / 0.62);
+  --surface-solid: hsl(0 0% 100% / 0.88);
+  --popover: hsl(0 0% 100%);
+  --secondary: hsl(224 20% 12% / 0.05);
+  --success: hsl(152 60% 42%);
+  --warn: hsl(32 90% 52%);
+  --danger: hsl(0 72% 51%);
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans-family);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slidein {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+@utility rise {
+  animation: rise 0.5s var(--ease) both;
+}
+
+@utility slidein {
+  animation: slidein 0.45s var(--ease) both;
+}
+
+@utility flowline {
+  stroke-dasharray: 4 4;
+  animation: dash 1.2s linear infinite;
+}
